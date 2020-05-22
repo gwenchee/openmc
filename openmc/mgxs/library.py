@@ -1,10 +1,9 @@
-import sys
-import os
-import copy
-import pickle
-from numbers import Integral
 from collections import OrderedDict
 from collections.abc import Iterable
+import copy
+from numbers import Integral
+import os
+import pickle
 from warnings import warn
 
 import numpy as np
@@ -12,10 +11,10 @@ import numpy as np
 import openmc
 import openmc.mgxs
 import openmc.checkvalue as cv
-from openmc.tallies import ESTIMATOR_TYPES
+from ..tallies import ESTIMATOR_TYPES
 
 
-class Library(object):
+class Library:
     """A multi-energy-group and multi-delayed-group cross section library for
     some energy group structure.
 
@@ -193,7 +192,9 @@ class Library(object):
         if self._domains == 'all':
             if self.domain_type == 'material':
                 return list(self.geometry.get_all_materials().values())
-            elif self.domain_type in ['cell', 'distribcell']:
+            elif self.domain_type == 'cell':
+                return list(self.geometry.get_all_cells().values())
+            elif self.domain_type in 'distribcell':
                 return list(self.geometry.get_all_material_cells().values())
             elif self.domain_type == 'universe':
                 return list(self.geometry.get_all_universes().values())
@@ -317,7 +318,10 @@ class Library(object):
             if self.domain_type == 'material':
                 cv.check_type('domain', domains, Iterable, openmc.Material)
                 all_domains = self.geometry.get_all_materials().values()
-            elif self.domain_type in ['cell', 'distribcell']:
+            elif self.domain_type == 'cell':
+                cv.check_type('domain', domains, Iterable, openmc.Cell)
+                all_domains = self.geometry.get_all_cells().values()
+            elif self.domain_type == 'distribcell':
                 cv.check_type('domain', domains, Iterable, openmc.Cell)
                 all_domains = self.geometry.get_all_material_cells().values()
             elif self.domain_type == 'universe':
@@ -864,11 +868,12 @@ class Library(object):
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-        full_filename = os.path.join(directory, filename + '.pkl')
+        full_filename = os.path.join(directory, '{}.pkl'.format(filename))
         full_filename = full_filename.replace(' ', '-')
 
         # Load and return pickled Library object
-        pickle.dump(self, open(full_filename, 'wb'))
+        with open(full_filename, 'wb') as f:
+            pickle.dump(self, f)
 
     @staticmethod
     def load_from_file(filename='mgxs', directory='mgxs'):
@@ -903,7 +908,8 @@ class Library(object):
         full_filename = full_filename.replace(' ', '-')
 
         # Load and return pickled Library object
-        return pickle.load(open(full_filename, 'rb'))
+        with open(full_filename, 'rb') as f:
+            return pickle.load(f)
 
     def get_xsdata(self, domain, xsdata_name, nuclide='total', xs_type='macro',
                    subdomain=None):
@@ -1271,8 +1277,6 @@ class Library(object):
                         xsdata_name = 'set' + str(i + 1)
                     else:
                         xsdata_name = xsdata_names[i]
-                    if nuclide != 'total':
-                        xsdata_name += '_' + nuclide
 
                     xsdata = self.get_xsdata(domain, xsdata_name,
                                              nuclide=nuclide, xs_type=xs_type)
@@ -1381,7 +1385,7 @@ class Library(object):
             materials = openmc.Materials()
 
             # Get all Cells from the Geometry for differentiation
-            all_cells = geometry.get_all_material_cells().values()
+            all_cells = geometry.get_all_cells().values()
 
             # Create the xsdata object and add it to the mgxs_file
             for i, domain in enumerate(self.domains):

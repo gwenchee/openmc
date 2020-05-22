@@ -7,6 +7,7 @@ will be left unimplemented and testing will be done via regression.
 """
 
 import copy
+from random import uniform
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -15,9 +16,23 @@ import pytest
 
 from openmc.deplete import (
     ReactionRates, Results, ResultsList, comm, OperatorResult,
-    PredictorIntegrator, SICELIIntegrator)
+    PredictorIntegrator, CECMIntegrator, CF4Integrator, CELIIntegrator,
+    EPCRK4Integrator, LEQIIntegrator, SICELIIntegrator, SILEQIIntegrator,
+    cram)
 
 from tests import dummy_operator
+
+
+INTEGRATORS = [
+    PredictorIntegrator,
+    CECMIntegrator,
+    CF4Integrator,
+    CELIIntegrator,
+    EPCRK4Integrator,
+    LEQIIntegrator,
+    SICELIIntegrator,
+    SILEQIIntegrator
+]
 
 
 def test_results_save(run_in_tmpdir):
@@ -105,14 +120,14 @@ def test_results_save(run_in_tmpdir):
     np.testing.assert_array_equal(res[1].time, t2)
 
 
-@pytest.mark.parametrize("timesteps", (1, [1]))
-def test_bad_integrator_inputs(timesteps):
+def test_bad_integrator_inputs():
     """Test failure modes for Integrator inputs"""
 
     op = MagicMock()
     op.prev_res = None
     op.chain = None
     op.heavy_metal = 1.0
+    timesteps = [1]
 
     # No power nor power density given
     with pytest.raises(ValueError, match="Either power or power density"):
@@ -132,6 +147,23 @@ def test_bad_integrator_inputs(timesteps):
 
     with pytest.raises(ValueError, match="n_steps"):
         SICELIIntegrator(op, timesteps, [1], n_steps=0)
+
+    with pytest.raises(ValueError, match="Solver failure"):
+        PredictorIntegrator(op, timesteps, power=1, solver="failure")
+
+    with pytest.raises(TypeError, match=".*callable.*NoneType"):
+        PredictorIntegrator(op, timesteps, power=1, solver=None)
+
+    with pytest.raises(ValueError, match=".*arguments"):
+        PredictorIntegrator(op, timesteps, power=1, solver=mock_bad_solver_nargs)
+
+
+def mock_good_solver(A, n, t):
+    pass
+
+
+def mock_bad_solver_nargs(A, n):
+    pass
 
 
 @pytest.mark.parametrize("scheme", dummy_operator.SCHEMES)
@@ -159,3 +191,75 @@ def test_integrator(run_in_tmpdir, scheme):
     dep_time = res.get_depletion_time()
     assert dep_time.shape == (2, )
     assert all(dep_time > 0)
+
+    integrator = bundle.solver(operator, [0.75], 1, solver=cram.CRAM48)
+    assert integrator.solver is cram.CRAM48
+
+    integrator = bundle.solver(operator, [0.75], 1, solver="cram16")
+    assert integrator.solver is cram.CRAM16
+
+    integrator.solver = mock_good_solver
+    assert integrator.solver is mock_good_solver
+
+    lfunc = lambda A, n, t: mock_good_solver(A, n, t)
+    integrator.solver = lfunc
+    assert integrator.solver is lfunc
+
+
+@pytest.mark.parametrize("integrator", INTEGRATORS)
+def test_timesteps(integrator):
+    # Crate fake operator
+    op = MagicMock()
+    op.prev_res = None
+    op.chain = None
+
+    # Set heavy metal mass and power randomly
+    op.heavy_metal = uniform(0, 10000)
+    power = uniform(0, 1e6)
+
+    # Reference timesteps in seconds
+    day = 86400.0
+    ref_timesteps = [1*day, 2*day, 5*day, 10*day]
+
+    # Case 1, timesteps in seconds
+    timesteps = ref_timesteps
+    x = integrator(op, timesteps, power, timestep_units='s')
+    assert np.allclose(x.timesteps, ref_timesteps)
+
+    # Case 2, timesteps in minutes
+    minute = 60
+    timesteps = [t / minute for t in ref_timesteps]
+    x = integrator(op, timesteps, power, timestep_units='min')
+    assert np.allclose(x.timesteps, ref_timesteps)
+
+    # Case 3, timesteps in hours
+    hour = 60*60
+    timesteps = [t / hour for t in ref_timesteps]
+    x = integrator(op, timesteps, power, timestep_units='h')
+    assert np.allclose(x.timesteps, ref_timesteps)
+
+    # Case 4, timesteps in days
+    timesteps = [t / day for t in ref_timesteps]
+    x = integrator(op, timesteps, power, timestep_units='d')
+    assert np.allclose(x.timesteps, ref_timesteps)
+
+    # Case 5, timesteps in MWd/kg
+    kilograms = op.heavy_metal / 1000.0
+    days = [t/day for t in ref_timesteps]
+    megawatts = power / 1000000.0
+    burnup = [t * megawatts / kilograms for t in days]
+    x = integrator(op, burnup, power, timestep_units='MWd/kg')
+    assert np.allclose(x.timesteps, ref_timesteps)
+
+    # Case 6, mixed units
+    burnup_per_day = (1e-6*power) / kilograms
+    timesteps = [(burnup_per_day, 'MWd/kg'), (2*day, 's'), (5, 'd'),
+                 (10*burnup_per_day, 'MWd/kg')]
+    x = integrator(op, timesteps, power)
+    assert np.allclose(x.timesteps, ref_timesteps)
+
+    # Bad units should raise an exception
+    with pytest.raises(ValueError, match="unit"):
+        integrator(op, ref_timesteps, power, timestep_units='🐨')
+    with pytest.raises(ValueError, match="unit"):
+        integrator(op, [(800.0, 'gorillas')], power)

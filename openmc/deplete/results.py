@@ -5,21 +5,20 @@ Contains results generation and saving capabilities.
 
 from collections import OrderedDict
 import copy
-from warnings import warn
 
-import numpy as np
 import h5py
+import numpy as np
 
-from . import comm, have_mpi, MPI
+from . import comm, MPI
 from .reaction_rates import ReactionRates
 
-_VERSION_RESULTS = (1, 0)
+VERSION_RESULTS = (1, 0)
 
 
 __all__ = ["Results"]
 
 
-class Results(object):
+class Results:
     """Output of a depletion run
 
     Attributes
@@ -36,7 +35,7 @@ class Results(object):
         Number of nuclides.
     rates : list of ReactionRates
         The reaction rates for each substep.
-    volume : OrderedDict of int to float
+    volume : OrderedDict of str to float
         Dictionary mapping mat id to volume.
     mat_to_ind : OrderedDict of str to int
         A dictionary mapping mat ID as string to index.
@@ -175,8 +174,8 @@ class Results(object):
         """
         new = Results()
         new.volume = {lm: self.volume[lm] for lm in local_materials}
-        new.mat_to_ind = dict(zip(
-            local_materials, range(len(local_materials))))
+        new.mat_to_ind = {mat: idx for (idx, mat) in enumerate(local_materials)}
+
         # Direct transfer
         direct_attrs = ("time", "k", "power", "nuc_to_ind",
                         "mat_to_hdf5_ind", "proc_time")
@@ -198,16 +197,24 @@ class Results(object):
             What step is this?
 
         """
-        if have_mpi and h5py.get_config().mpi:
-            kwargs = {'driver': 'mpio', 'comm': comm}
-        else:
-            kwargs = {}
-
         # Write new file if first time step, else add to existing file
-        kwargs['mode'] = "w" if step == 0 else "a"
+        kwargs = {'mode': "w" if step == 0 else "a"}
 
-        with h5py.File(filename, **kwargs) as handle:
-            self._to_hdf5(handle, step)
+        if h5py.get_config().mpi and comm.size > 1:
+            # Write results in parallel
+            kwargs['driver'] = 'mpio'
+            kwargs['comm'] = comm
+            with h5py.File(filename, **kwargs) as handle:
+                self._to_hdf5(handle, step, parallel=True)
+        else:
+            # Gather results at root process
+            all_results = comm.gather(self)
+
+            # Only root process writes results
+            if comm.rank == 0:
+                with h5py.File(filename, **kwargs) as handle:
+                    for res in all_results:
+                        res._to_hdf5(handle, step, parallel=False)
 
     def _write_hdf5_metadata(self, handle):
         """Writes result metadata in HDF5 file
@@ -229,7 +236,7 @@ class Results(object):
 
         # Store concentration mat and nuclide dictionaries (along with volumes)
 
-        handle.attrs['version'] = np.array(_VERSION_RESULTS)
+        handle.attrs['version'] = np.array(VERSION_RESULTS)
         handle.attrs['filetype'] = np.string_('depletion results')
 
         mat_list = sorted(self.mat_to_hdf5_ind, key=int)
@@ -287,7 +294,7 @@ class Results(object):
             "depletion time", (1,), maxshape=(None,),
             dtype="float64")
 
-    def _to_hdf5(self, handle, index):
+    def _to_hdf5(self, handle, index, parallel=False):
         """Converts results object into an hdf5 object.
 
         Parameters
@@ -296,13 +303,17 @@ class Results(object):
             An HDF5 file or group type to store this in.
         index : int
             What step is this?
+        parallel : bool
+            Being called with parallel HDF5?
 
         """
         if "/number" not in handle:
-            comm.barrier()
+            if parallel:
+                comm.barrier()
             self._write_hdf5_metadata(handle)
 
-        comm.barrier()
+        if parallel:
+            comm.barrier()
 
         # Grab handles
         number_dset = handle["/number"]
@@ -354,13 +365,13 @@ class Results(object):
         low = min(inds)
         high = max(inds)
         for i in range(n_stages):
-            number_dset[index, i, low:high+1, :] = self.data[i, :, :]
-            rxn_dset[index, i, low:high+1, :, :] = self.rates[i][:, :, :]
+            number_dset[index, i, low:high+1] = self.data[i]
+            rxn_dset[index, i, low:high+1] = self.rates[i]
             if comm.rank == 0:
                 eigenvalues_dset[index, i] = self.k[i]
         if comm.rank == 0:
-            time_dset[index, :] = self.time
-            power_dset[index, :] = self.power
+            time_dset[index] = self.time
+            power_dset[index] = self.power
             if self.proc_time is not None:
                 proc_time_dset[index] = (
                     self.proc_time / (comm.size * self.n_hdf5_mats)

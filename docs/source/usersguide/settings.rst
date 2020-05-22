@@ -110,13 +110,24 @@ The spatial distribution can be set equal to a sub-class of
 :class:`openmc.stats.Spatial`; common choices are :class:`openmc.stats.Point` or
 :class:`openmc.stats.Box`. To independently specify distributions in the
 :math:`x`, :math:`y`, and :math:`z` coordinates, you can use
-:class:`openmc.stats.CartesianIndependent`.
+:class:`openmc.stats.CartesianIndependent`. To independently specify
+distributions using spherical or cylindrical coordinates, you can use
+:class:`openmc.stats.SphericalIndependent` or
+:class:`openmc.stats.CylindricalIndependent`, respectively.
 
 The angular distribution can be set equal to a sub-class of
 :class:`openmc.stats.UnitSphere` such as :class:`openmc.stats.Isotropic`,
-:class:`openmc.stats.Monodirectional`, or
-:class:`openmc.stats.PolarAzimuthal`. By default, if no angular distribution is
-specified, an isotropic angular distribution is used.
+:class:`openmc.stats.Monodirectional`, or :class:`openmc.stats.PolarAzimuthal`.
+By default, if no angular distribution is specified, an isotropic angular
+distribution is used. As an example of a non-trivial angular distribution, the
+following code would create a conical distribution with an aperture of 30
+degrees pointed in the positive x direction::
+
+  from math import pi, cos
+  aperture = 30.0
+  mu = openmc.stats.Uniform(cos(aperture/2), 1.0)
+  phi = openmc.stats.Uniform(0.0, 2*pi)
+  angle = openmc.stats.PolarAzimuthal(mu, phi, reference_uvw=(1., 0., 0.))
 
 The energy distribution can be set equal to any univariate probability
 distribution. This could be a probability mass function
@@ -164,6 +175,66 @@ following would generate a photon source::
 For a full list of all classes related to statistical distributions, see
 :ref:`pythonapi_stats`.
 
+.. _custom_source:
+
+Custom Sources
+--------------
+
+It is often the case that one may wish to simulate a complex source distribution
+that is not possible to represent with the classes described above. For these
+situations, it is possible to define a complex source with an externally defined
+source function that is loaded at runtime. A simple example source is shown
+below.
+
+.. code-block:: c++
+
+   #include "openmc/random_lcg.h"
+   #include "openmc/source.h"
+   #include "openmc/particle.h"
+
+   // you must have external C linkage here
+   extern "C" openmc::Particle::Bank sample_source(uint64_t* seed) {
+     openmc::Particle::Bank particle;
+     // weight
+     particle.particle = openmc::Particle::Type::neutron;
+     particle.wgt = 1.0;
+     // position
+     double angle = 2.0 * M_PI * openmc::prn(seed);
+     double radius = 3.0;
+     particle.r.x = radius * std::cos(angle);
+     particle.r.y = radius * std::sin(angle);
+     particle.r.z = 0.0;
+     // angle
+     particle.u = {1.0, 0.0, 0.0};
+     particle.E = 14.08e6;
+     particle.delayed_group = 0;
+     return particle;
+  }
+
+The above source creates monodirectional 14.08 MeV neutrons that are distributed
+in a ring with a 3 cm radius. This routine is not particularly complex, but
+should serve as an example upon which to build more complicated sources.
+
+  .. note:: The function signature must be declared ``extern "C"``.
+
+  .. note:: You should only use the openmc::prn() random number generator
+
+In order to build your external source, you will need to link it against the
+OpenMC shared library. This can be done by writing a CMakeLists.txt file:
+
+.. code-block:: cmake
+
+   cmake_minimum_required(VERSION 3.3 FATAL_ERROR)
+   project(openmc_sources CXX)
+   add_library(source SHARED source_ring.cpp)
+   find_package(OpenMC REQUIRED HINTS <path to openmc>)
+   target_link_libraries(source OpenMC::libopenmc)
+
+After running ``cmake`` and ``make``, you will have a libsource.so (or .dylib)
+file in your build directory. Setting the :attr:`openmc.Source.library`
+attribute to the path of this shared library will indicate that it should be
+used for sampling source particles at runtime.
+
 ---------------
 Shannon Entropy
 ---------------
@@ -171,16 +242,17 @@ Shannon Entropy
 To assess convergence of the source distribution, the scalar Shannon entropy
 metric is often used in Monte Carlo codes. OpenMC also allows you to calculate
 Shannon entropy at each generation over a specified mesh, created using the
-:class:`openmc.Mesh` class. After instantiating a :class:`Mesh`, you need to
-specify the lower-left coordinates of the mesh (:attr:`Mesh.lower_left`), the
-number of mesh cells in each direction (:attr:`Mesh.dimension`) and either the
-upper-right coordinates of the mesh (:attr:`Mesh.upper_right`) or the width of
-each mesh cell (:attr:`Mesh.width`). Once you have a mesh, simply assign it to
-the :attr:`Settings.entropy_mesh` attribute.
+:class:`openmc.RegularMesh` class. After instantiating a :class:`RegularMesh`,
+you need to specify the lower-left coordinates of the mesh
+(:attr:`RegularMesh.lower_left`), the number of mesh cells in each direction
+(:attr:`RegularMesh.dimension`) and either the upper-right coordinates of the
+mesh (:attr:`RegularMesh.upper_right`) or the width of each mesh cell
+(:attr:`RegularMesh.width`). Once you have a mesh, simply assign it to the
+:attr:`Settings.entropy_mesh` attribute.
 
 ::
 
-   entropy_mesh = openmc.Mesh()
+   entropy_mesh = openmc.RegularMesh()
    entropy_mesh.lower_left = (-50, -50, -25)
    entropy_mesh.upper_right = (50, 50, 25)
    entropy_mesh.dimension = (8, 8, 8)
@@ -193,7 +265,7 @@ property::
 
   geom = openmc.Geometry()
   ...
-  m = openmc.Mesh()
+  m = openmc.RegularMesh()
   m.lower_left, m.upper_right = geom.bounding_box
   m.dimension = (8, 8, 8)
 

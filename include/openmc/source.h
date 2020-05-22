@@ -43,7 +43,14 @@ public:
   Particle::Bank sample(uint64_t* seed) const;
 
   // Properties
+  Particle::Type particle_type() const { return particle_; }
   double strength() const { return strength_; }
+
+  // Make observing pointers available
+  SpatialDistribution* space() const { return space_.get(); }
+  UnitSphereDistribution* angle() const { return angle_.get(); }
+  Distribution* energy() const { return energy_.get(); }
+
 private:
   Particle::Type particle_ {Particle::Type::neutron}; //!< Type of particle emitted
   double strength_ {1.0}; //!< Source strength
@@ -65,8 +72,17 @@ extern "C" void initialize_source();
 //! \return Sampled source site
 Particle::Bank sample_external_source(uint64_t* seed);
 
-//! Fill source bank at end of generation for fixed source simulations
-void fill_source_bank_fixedsource();
+//! Sample a site from custom source library
+Particle::Bank sample_custom_source_library(uint64_t* seed);
+
+//! Load custom source library
+void load_custom_source_library();
+
+//! Release custom source library
+void close_custom_source_library();
+
+//! Fill source bank at the end of a generation for dlopen based source simulation
+void fill_source_bank_custom_source();
 
 void free_memory_source();
 

@@ -1,11 +1,11 @@
 from datetime import datetime
+import glob
 import re
 import os
 import warnings
-import glob
 
-import numpy as np
 import h5py
+import numpy as np
 from uncertainties import ufloat
 
 import openmc
@@ -14,14 +14,14 @@ import openmc.checkvalue as cv
 _VERSION_STATEPOINT = 17
 
 
-class StatePoint(object):
+class StatePoint:
     """State information on a simulation at a certain point in time (at the end
     of a given batch). Statepoints can be used to analyze tally results as well
     as restart a simulation.
 
     Parameters
     ----------
-    filename : str
+    filepath : str or Path
         Path to file to load
     autolink : bool, optional
         Whether to automatically link in metadata from a summary.h5 file and
@@ -115,7 +115,8 @@ class StatePoint(object):
 
     """
 
-    def __init__(self, filename, autolink=True):
+    def __init__(self, filepath, autolink=True):
+        filename = str(filepath)  # in case it's a Path
         self._f = h5py.File(filename, 'r')
         self._meshes = {}
         self._filters = {}
@@ -415,14 +416,10 @@ class StatePoint(object):
                         nuclide = openmc.Nuclide(name.decode().strip())
                         tally.nuclides.append(nuclide)
 
-                    scores = group['score_bins'][()]
-                    n_score_bins = group['n_score_bins'][()]
-
                     # Add the scores to the Tally
-                    for j, score in enumerate(scores):
-                        score = score.decode()
-
-                        tally.scores.append(score)
+                    scores = group['score_bins'][()]
+                    for score in scores:
+                        tally.scores.append(score.decode())
 
                     # Add Tally to the global dictionary of all Tallies
                     tally.sparse = self.sparse
@@ -585,15 +582,7 @@ class StatePoint(object):
 
             # Determine if Tally has the queried score(s)
             if scores:
-                contains_scores = True
-
-                # Iterate over the scores requested by the user
-                for score in scores:
-                    if score not in test_tally.scores:
-                        contains_scores = False
-                        break
-
-                if not contains_scores:
+                if not all(score in test_tally.scores for score in scores):
                     continue
 
             # Determine if Tally has the queried Filter(s)
@@ -619,15 +608,7 @@ class StatePoint(object):
 
             # Determine if Tally has the queried Nuclide(s)
             if nuclides:
-                contains_nuclides = True
-
-                # Iterate over the Nuclides requested by the user
-                for nuclide in nuclides:
-                    if nuclide not in test_tally.nuclides:
-                        contains_nuclides = False
-                        break
-
-                if not contains_nuclides:
+                if not all(nuclide in test_tally.nuclides for nuclide in nuclides):
                     continue
 
             # If the current Tally met user's request, break loop and return it
@@ -675,7 +656,7 @@ class StatePoint(object):
 
         cells = summary.geometry.get_all_cells()
 
-        for tally_id, tally in self.tallies.items():
+        for tally in self.tallies.values():
             tally.with_summary = True
 
             for tally_filter in tally.filters:

@@ -12,11 +12,10 @@
 #include "openmc/surface.h"
 
 #ifdef DAGMC
-
 #include "uwuw.hpp"
 #include "dagmcmetadata.hpp"
-
 #endif
+#include <fmt/core.h>
 
 #include <string>
 #include <sstream>
@@ -46,16 +45,17 @@ moab::DagMC* DAG;
 } // namespace model
 
 
-void check_dagmc_file() {
+std::string dagmc_file() {
   std::string filename = settings::path_input + DAGMC_FILENAME;
   if (!file_exists(filename)) {
     fatal_error("Geometry DAGMC file '" + filename + "' does not exist!");
   }
+  return filename;
 }
 
 bool get_uwuw_materials_xml(std::string& s) {
-  check_dagmc_file();
-  UWUW uwuw((settings::path_input + DAGMC_FILENAME).c_str());
+  std::string filename = dagmc_file();
+  UWUW uwuw(filename.c_str());
 
   std::stringstream ss;
   bool uwuw_mats_present = false;
@@ -80,6 +80,9 @@ bool read_uwuw_materials(pugi::xml_document& doc) {
   bool found_uwuw_mats = get_uwuw_materials_xml(s);
   if (found_uwuw_mats) {
     pugi::xml_parse_result result = doc.load_string(s.c_str());
+    if (!result) {
+      throw std::runtime_error{"Error reading UWUW materials"};
+    }
   }
   return found_uwuw_mats;
 }
@@ -110,11 +113,10 @@ void legacy_assign_material(const std::string& mat_string, DAGCell* c)
         c->material_.push_back(m->id_);
       // report error if more than one material is found
       } else {
-        std::stringstream err_msg;
-        err_msg << "More than one material found with name " << mat_string
-                << ". Please ensure materials have unique names if using this"
-                << " property to assign materials.";
-        fatal_error(err_msg);
+        fatal_error(fmt::format(
+          "More than one material found with name {}. Please ensure materials "
+          "have unique names if using this property to assign materials.",
+          mat_string));
       }
     }
   }
@@ -125,10 +127,8 @@ void legacy_assign_material(const std::string& mat_string, DAGCell* c)
       auto id = std::stoi(mat_string);
       c->material_.emplace_back(id);
     } catch (const std::invalid_argument&) {
-      std::stringstream err_msg;
-      err_msg << "No material " << mat_string
-              << " found for volume (cell) " << c->id_;
-      fatal_error(err_msg);
+      fatal_error(fmt::format(
+        "No material {} found for volume (cell) {}", mat_string, c->id_));
     }
   }
 
@@ -147,17 +147,14 @@ void legacy_assign_material(const std::string& mat_string, DAGCell* c)
 
 void load_dagmc_geometry()
 {
-  check_dagmc_file();
-
   if (!model::DAG) {
     model::DAG = new moab::DagMC();
   }
 
-
-  std::string filename = settings::path_input + DAGMC_FILENAME;
   // --- Materials ---
 
   // create uwuw instance
+  auto filename = dagmc_file();
   UWUW uwuw(filename.c_str());
 
   // check for uwuw material definitions
@@ -253,9 +250,7 @@ void load_dagmc_geometry()
       rval = model::DAG->prop_value(vol_handle, "mat", mat_value);
       MB_CHK_ERR_CONT(rval);
     } else {
-      std::stringstream err_msg;
-      err_msg << "Volume " << c->id_ << " has no material assignment.";
-      fatal_error(err_msg.str());
+      fatal_error(fmt::format("Volume {} has no material assignment.", c->id_));
     }
 
     std::string cmp_str = mat_value;
@@ -277,10 +272,8 @@ void load_dagmc_geometry()
           int mat_number = uwuw.material_library[uwuw_mat].metadata["mat_number"].asInt();
           c->material_.push_back(mat_number);
         } else {
-          std::stringstream err_msg;
-          err_msg << "Material with value " << mat_value << " not found ";
-          err_msg << "in the UWUW material library";
-          fatal_error(err_msg);
+          fatal_error(fmt::format("Material with value {} not found in the "
+            "UWUW material library", mat_value));
         }
       } else {
         legacy_assign_material(mat_value, c);
@@ -348,10 +341,8 @@ void load_dagmc_geometry()
       } else if (bc_value == "periodic") {
         fatal_error("Periodic boundary condition not supported in DAGMC.");
       } else {
-        std::stringstream err_msg;
-        err_msg << "Unknown boundary condition \"" << bc_value
-                << "\" specified on surface " << s->id_;
-        fatal_error(err_msg);
+        fatal_error(fmt::format("Unknown boundary condition \"{}\" specified "
+          "on surface {}", bc_value, s->id_));
       }
     } else {
       // if no condition is found, set to transmit
@@ -379,8 +370,6 @@ void load_dagmc_geometry()
 
 void read_geometry_dagmc()
 {
-  // Check if dagmc.h5m exists
-  check_dagmc_file();
   write_message("Reading DAGMC geometry...", 5);
   load_dagmc_geometry();
 

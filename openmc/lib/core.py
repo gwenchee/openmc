@@ -1,14 +1,11 @@
-import sys
-
 from contextlib import contextmanager
-from ctypes import (CDLL, c_bool, c_int, c_int32, c_int64, c_double, c_char_p,
+from ctypes import (c_bool, c_int, c_int32, c_int64, c_double, c_char_p,
                     c_char, POINTER, Structure, c_void_p, create_string_buffer)
-from warnings import warn
+import sys
 
 import numpy as np
 from numpy.ctypeslib import as_array
 
-from openmc.exceptions import AllocationError
 from . import _dll
 from .error import _error_handler
 import openmc.lib
@@ -63,6 +60,8 @@ _dll.openmc_run.restype = c_int
 _dll.openmc_run.errcheck = _error_handler
 _dll.openmc_reset.restype = c_int
 _dll.openmc_reset.errcheck = _error_handler
+_dll.openmc_reset_timers.restype = c_int
+_dll.openmc_reset_timers.errcheck = _error_handler
 _run_linsolver_argtypes = [_array_1d_dble, _array_1d_dble, _array_1d_dble,
                            c_double]
 _dll.openmc_run_linsolver.argtypes = _run_linsolver_argtypes
@@ -185,16 +184,15 @@ def init(args=None, intracomm=None):
     """
     if args is not None:
         args = ['openmc'] + list(args)
-        argc = len(args)
-
-        # Create the argv array. Note that it is actually expected to be of
-        # length argc + 1 with the final item being a null pointer.
-        argv = (POINTER(c_char) * (argc + 1))()
-        for i, arg in enumerate(args):
-            argv[i] = create_string_buffer(arg.encode())
     else:
-        argc = 0
-        argv = None
+        args = ['openmc']
+
+    argc = len(args)
+    # Create the argv array. Note that it is actually expected to be of
+    # length argc + 1 with the final item being a null pointer.
+    argv = (POINTER(c_char) * (argc + 1))()
+    for i, arg in enumerate(args):
+        argv[i] = create_string_buffer(arg.encode())
 
     if intracomm is not None:
         # If an mpi4py communicator was passed, convert it to void* to be passed
@@ -303,8 +301,13 @@ def plot_geometry():
 
 
 def reset():
-    """Reset tallies and timers."""
+    """Reset tally results"""
     _dll.openmc_reset()
+
+
+def reset_timers():
+    """Reset timers."""
+    _dll.openmc_reset_timers()
 
 
 def run():
@@ -336,9 +339,23 @@ def source_bank():
     n = c_int64()
     _dll.openmc_source_bank(ptr, n)
 
-    # Convert to numpy array with appropriate datatype
-    bank_dtype = np.dtype(_Bank)
-    return as_array(ptr, (n.value,)).view(bank_dtype)
+    try:
+        # Convert to numpy array with appropriate datatype
+        bank_dtype = np.dtype(_Bank)
+        return as_array(ptr, (n.value,)).view(bank_dtype)
+
+    except ValueError as err:
+        # If a known numpy error was raised (github.com/numpy/numpy/issues
+        # /14214), re-raise with a more helpful error message.
+        if len(err.args) == 0:
+            raise err
+        if err.args[0].startswith('invalid shape in fixed-type tuple'):
+            raise ValueError('The source bank is too large to access via '
+                'openmc.lib with this version of numpy.  Use a different '
+                'version of numpy or reduce the bank size (fewer particles '
+                'per MPI process) so that it is smaller than 2 GB.') from err
+        else:
+            raise err
 
 
 def statepoint_write(filename=None, write_source=True):
@@ -386,7 +403,7 @@ def run_in_memory(**kwargs):
         finalize()
 
 
-class _DLLGlobal(object):
+class _DLLGlobal:
     """Data descriptor that exposes global variables from libopenmc."""
     def __init__(self, ctype, name):
         self.ctype = ctype
@@ -399,7 +416,7 @@ class _DLLGlobal(object):
         self.ctype.in_dll(_dll, self.name).value = value
 
 
-class _FortranObject(object):
+class _FortranObject:
     def __repr__(self):
         return "{}[{}]".format(type(self).__name__, self._index)
 

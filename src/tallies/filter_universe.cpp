@@ -1,6 +1,6 @@
 #include "openmc/tallies/filter_universe.h"
 
-#include <sstream>
+#include <fmt/core.h>
 
 #include "openmc/cell.h"
 #include "openmc/error.h"
@@ -16,10 +16,8 @@ UniverseFilter::from_xml(pugi::xml_node node)
   for (auto& u : universes) {
     auto search = model::universe_map.find(u);
     if (search == model::universe_map.end()) {
-      std::stringstream err_msg;
-      err_msg << "Could not find universe " << u
-              << " specified on tally filter.";
-      throw std::runtime_error{err_msg.str()};
+      throw std::runtime_error{fmt::format(
+        "Could not find universe {} specified on tally filter.", u)};
     }
     u = search->second;
   }
@@ -47,11 +45,11 @@ UniverseFilter::set_universes(gsl::span<int32_t> universes)
 }
 
 void
-UniverseFilter::get_all_bins(const Particle* p, TallyEstimator estimator,
+UniverseFilter::get_all_bins(const Particle& p, TallyEstimator estimator,
                              FilterMatch& match) const
 {
-  for (int i = 0; i < p->n_coord_; i++) {
-    auto search = map_.find(p->coord_[i].universe);
+  for (int i = 0; i < p.n_coord_; i++) {
+    auto search = map_.find(p.coord_[i].universe);
     if (search != map_.end()) {
       match.bins_.push_back(search->second);
       match.weights_.push_back(1.0);
@@ -71,7 +69,7 @@ UniverseFilter::to_statepoint(hid_t filter_group) const
 std::string
 UniverseFilter::text_label(int bin) const
 {
-  return "Universe " + std::to_string(model::universes[universes_[bin]]->id_);
+  return fmt::format("Universe {}", model::universes[universes_[bin]]->id_);
 }
 
 } // namespace openmc

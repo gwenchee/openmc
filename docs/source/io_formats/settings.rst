@@ -142,7 +142,7 @@ materials in the problem and is specified using a :ref:`mesh_element`.
 ----------------------------
 
 Determines whether to use event-based parallelism instead of the default
-history-based parallelism. 
+history-based parallelism.
 
   *Default*: false
 
@@ -456,6 +456,15 @@ attributes/sub-elements:
     a binary source file whose path is given by the value of this element. Note,
     the number of source sites needs to be the same as the number of particles
     simulated in a fission source generation.
+
+    *Default*: None
+
+  :library:
+    If this attribute is given, it indicates that the source is to be
+    instantiated from an externally compiled source function. This source can be
+    as complex as is required to define the source for your problem. The only
+    requirement is that there is a function called ``sample_source()``. More
+    documentation on how to build sources can be found in :ref:`custom_source`.
 
     *Default*: None
 

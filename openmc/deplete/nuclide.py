@@ -13,7 +13,7 @@ try:
 except ImportError:
     import xml.etree.ElementTree as ET
 
-from numpy import empty
+from numpy import empty, searchsorted
 
 from openmc.checkvalue import check_type
 
@@ -30,8 +30,10 @@ Parameters
 ----------
 type : str
     Type of the decay mode, e.g., 'beta-'
-target : str
-    Nuclide resulting from decay
+target : str or None
+    Nuclide resulting from decay. A value of ``None`` implies the
+    target does not exist in the currently configured depletion
+    chain
 branching_ratio : float
     Branching ratio of the decay mode
 
@@ -53,8 +55,11 @@ Parameters
 ----------
 type : str
     Type of the reaction, e.g., 'fission'
-target : str
-    nuclide resulting from reaction
+target : str or None
+    Nuclide resulting from reaction. A value of ``None``
+    implies either no single target, e.g. from fission,
+    or that the target nuclide is not considered
+    in the current depletion chain
 Q : float
     Q value of the reaction in [eV]
 branching_ratio : float
@@ -70,7 +75,7 @@ except AttributeError:
     pass
 
 
-class Nuclide(object):
+class Nuclide:
     """Decay modes, reactions, and fission yields for a single nuclide.
 
     Parameters
@@ -179,6 +184,8 @@ class Nuclide(object):
         for decay_elem in element.iter('decay'):
             d_type = decay_elem.get('type')
             target = decay_elem.get('target')
+            if target is not None and target.lower() == "nothing":
+                target = None
             branching_ratio = float(decay_elem.get('branching_ratio'))
             nuc.decay_modes.append(DecayTuple(d_type, target, branching_ratio))
 
@@ -192,6 +199,8 @@ class Nuclide(object):
             # just set null values
             if r_type != 'fission':
                 target = reaction_elem.get('target')
+                if target is not None and target.lower() == "nothing":
+                    target = None
             else:
                 target = None
                 if fission_q is not None:
@@ -223,10 +232,10 @@ class Nuclide(object):
             elem.set('half_life', str(self.half_life))
             elem.set('decay_modes', str(len(self.decay_modes)))
             elem.set('decay_energy', str(self.decay_energy))
-            for mode, daughter, br in self.decay_modes:
+            for mode_type, daughter, br in self.decay_modes:
                 mode_elem = ET.SubElement(elem, 'decay')
-                mode_elem.set('type', mode)
-                mode_elem.set('target', daughter)
+                mode_elem.set('type', mode_type)
+                mode_elem.set('target', daughter or "Nothing")
                 mode_elem.set('branching_ratio', str(br))
 
         elem.set('reactions', str(len(self.reactions)))
@@ -234,7 +243,7 @@ class Nuclide(object):
             rx_elem = ET.SubElement(elem, 'reaction')
             rx_elem.set('type', rx)
             rx_elem.set('Q', str(Q))
-            if rx != 'fission':
+            if daughter is not None:
                 rx_elem.set('target', daughter)
             if br != 1.0:
                 rx_elem.set('branching_ratio', str(br))
@@ -397,9 +406,7 @@ class FissionYieldDistribution(Mapping):
         for g_index, energy in enumerate(energies):
             prod_map = fission_yields[energy]
             for prod_ix, product in enumerate(ordered_prod):
-                yield_val = prod_map.get(product)
-                yield_matrix[g_index, prod_ix] = (
-                    0.0 if yield_val is None else yield_val)
+                yield_matrix[g_index, prod_ix] = prod_map.get(product, 0.0)
         self.energies = tuple(energies)
         self.products = tuple(ordered_prod)
         self.yield_matrix = yield_matrix
@@ -435,7 +442,7 @@ class FissionYieldDistribution(Mapping):
         FissionYieldDistribution
         """
         all_yields = {}
-        for elem_index, yield_elem in enumerate(element.iter("fission_yields")):
+        for yield_elem in element.iter("fission_yields"):
             energy = float(yield_elem.get("energy"))
             products = yield_elem.find("products").text.split()
             yields = map(float, yield_elem.find("data").text.split())
@@ -459,6 +466,39 @@ class FissionYieldDistribution(Mapping):
             product_elem.text = " ".join(map(str, yield_obj.products))
             data_elem = ET.SubElement(yield_element, "data")
             data_elem.text = " ".join(map(str, yield_obj.yields))
+
+    def restrict_products(self, possible_products):
+        """Return a new distribution with select products
+
+        .. versionadded:: 0.12
+
+        Parameters
+        ----------
+        possible_products : iterable of str
+            Candidate pool of fission products. Existing products
+            not contained here will not exist in the new instance
+
+        Returns
+        -------
+        FissionYieldDistribution or None
+            A value of None indicates no values in
+            ``possible_products`` exist in :attr:`products`
+
+        """
+
+        overlap = set(self.products).intersection(possible_products)
+        if not overlap:
+            return None
+
+        products = sorted(overlap)
+        indices = searchsorted(self.products, products)
+
+        # coerce back to dictionary to pass back to __init__
+        new_yields = {}
+        for ene, yields in zip(self.energies, self.yield_matrix.copy()):
+            new_yields[ene] = dict(zip(products, yields[indices]))
+
+        return type(self)(new_yields)
 
 
 class FissionYield(Mapping):
@@ -533,6 +573,7 @@ class FissionYield(Mapping):
         return zip(self.products, self.yields)
 
     def __add__(self, other):
+        """Add one set of fission yields to this set, return new yields"""
         if not isinstance(other, FissionYield):
             return NotImplemented
         new = FissionYield(self.products, self.yields.copy())
@@ -550,12 +591,14 @@ class FissionYield(Mapping):
         return self + other
 
     def __imul__(self, scalar):
+        """Scale these fission yields by a real scalar"""
         if not isinstance(scalar, Real):
             return NotImplemented
         self.yields *= scalar
         return self
 
     def __mul__(self, scalar):
+        """Return a new set of yields scaled by a real scalar"""
         if not isinstance(scalar, Real):
             return NotImplemented
         new = FissionYield(self.products, self.yields.copy())
@@ -568,3 +611,8 @@ class FissionYield(Mapping):
     def __repr__(self):
         return "<{} containing {} products and yields>".format(
             self.__class__.__name__, len(self))
+
+    # Avoid greedy numpy operations like np.float64 * fission_yield
+    # converting this to an array on the fly. Force __rmul__ and
+    # __radd__. See issue #1492
+    __array_ufunc__ = None

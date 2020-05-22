@@ -9,6 +9,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # Set module path
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules)
 
+# Allow user to specify <project>_ROOT variables
+if (NOT (CMAKE_VERSION VERSION_LESS 3.12))
+  cmake_policy(SET CMP0074 NEW)
+endif()
+
 #===============================================================================
 # Command line options
 #===============================================================================
@@ -34,18 +39,12 @@ endif()
 # DAGMC Geometry Support - need DAGMC/MOAB
 #===============================================================================
 if(dagmc)
-  find_package(DAGMC REQUIRED)
-  link_directories(${DAGMC_LIBRARY_DIRS})
+  find_package(DAGMC REQUIRED PATH_SUFFIXES lib/cmake)
 endif()
 
 #===============================================================================
 # HDF5 for binary output
 #===============================================================================
-
-# Allow user to specify HDF5_ROOT
-if (NOT (CMAKE_VERSION VERSION_LESS 3.12))
-  cmake_policy(SET CMP0074 NEW)
-endif()
 
 # Unfortunately FindHDF5.cmake will always prefer a serial HDF5 installation
 # over a parallel installation if both appear on the user's PATH. To get around
@@ -66,6 +65,13 @@ if(HDF5_IS_PARALLEL)
     message(FATAL_ERROR "Parallel HDF5 must be used with MPI.")
   endif()
   message(STATUS "Using parallel HDF5")
+endif()
+
+# Version 1.12 of HDF5 deprecates the H5Oget_info_by_idx() interface.
+# Thus, we give these flags to allow usage of the old interface in newer
+# versions of HDF5.
+if(NOT (${HDF5_VERSION} VERSION_LESS 1.12.0))
+  list(APPEND cxxflags -DH5Oget_info_by_idx_vers=1 -DH5O_info_t_vers=1)
 endif()
 
 #===============================================================================
@@ -141,6 +147,13 @@ endif()
 add_subdirectory(vendor/pugixml)
 
 #===============================================================================
+# {fmt} library
+#===============================================================================
+
+set(FMT_INSTALL ON CACHE BOOL "Generate the install target.")
+add_subdirectory(vendor/fmt)
+
+#===============================================================================
 # xtensor header-only library
 #===============================================================================
 
@@ -152,16 +165,18 @@ endif()
 add_subdirectory(vendor/xtl)
 set(xtl_DIR ${CMAKE_CURRENT_BINARY_DIR}/vendor/xtl)
 add_subdirectory(vendor/xtensor)
-target_link_libraries(xtensor INTERFACE xtl)
 
 #===============================================================================
 # GSL header-only library
 #===============================================================================
 
+set(GSL_LITE_OPT_INSTALL_COMPAT_HEADER ON CACHE BOOL
+  "Install MS-GSL compatibility header <gsl/gsl>")
 add_subdirectory(vendor/gsl-lite)
 
 # Make sure contract violations throw exceptions
-target_compile_definitions(gsl-lite INTERFACE GSL_THROW_ON_CONTRACT_VIOLATION)
+target_compile_definitions(gsl-lite-v1 INTERFACE GSL_THROW_ON_CONTRACT_VIOLATION)
+target_compile_definitions(gsl-lite-v1 INTERFACE gsl_CONFIG_ALLOWS_NONSTRICT_SPAN_COMPARISON=1)
 
 #===============================================================================
 # RPATH information
@@ -345,12 +360,11 @@ endif()
 # target_link_libraries treats any arguments starting with - but not -l as
 # linker flags. Thus, we can pass both linker flags and libraries together.
 target_link_libraries(libopenmc ${ldflags} ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES}
-                      pugixml faddeeva xtensor gsl-lite)
+                      pugixml faddeeva xtensor gsl-lite-v1 fmt::fmt)
 
 if(dagmc)
   target_compile_definitions(libopenmc PRIVATE DAGMC)
-  target_link_libraries(libopenmc ${DAGMC_LIBRARIES})
-  target_include_directories(libopenmc PRIVATE ${DAGMC_INCLUDE_DIRS})
+  target_link_libraries(libopenmc dagmc-shared uwuw-shared)
 endif()
 
 #===============================================================================
@@ -380,6 +394,8 @@ add_custom_command(TARGET libopenmc POST_BUILD
 # Install executable, scripts, manpage, license
 #===============================================================================
 
+configure_file(cmake/OpenMCConfig.cmake.in "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenMCConfig.cmake" @ONLY)
+
 set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/OpenMC)
 install(TARGETS openmc libopenmc faddeeva
   EXPORT openmc-targets
@@ -393,7 +409,7 @@ install(EXPORT openmc-targets
   DESTINATION ${INSTALL_CONFIGDIR})
 
 install(DIRECTORY src/relaxng DESTINATION ${CMAKE_INSTALL_DATADIR}/openmc)
-install(FILES cmake/OpenMCConfig.cmake DESTINATION ${INSTALL_CONFIGDIR})
+install(FILES "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenMCConfig.cmake" DESTINATION ${INSTALL_CONFIGDIR})
 install(FILES man/man1/openmc.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DOCDIR}" RENAME copyright)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

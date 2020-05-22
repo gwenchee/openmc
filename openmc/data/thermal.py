@@ -444,7 +444,7 @@ class ThermalScattering(EqualityMixin):
         ----------
         path : str
             Path to write HDF5 file to
-        mode : {'r', r+', 'w', 'x', 'a'}
+        mode : {'r+', 'w', 'x', 'a'}
             Mode that is used to open the HDF5 file. This is the second argument
             to the :class:`h5py.File` constructor.
         libver : {'earliest', 'latest'}
@@ -766,8 +766,8 @@ class ThermalScattering(EqualityMixin):
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             # Run NJOY to create an ACE library
-            kwargs.setdefault('ace', os.path.join(tmpdir, 'ace'))
-            kwargs.setdefault('xsdir', os.path.join(tmpdir, 'xsdir'))
+            kwargs.setdefault('output_dir', tmpdir)
+            kwargs.setdefault('ace', os.path.join(kwargs['output_dir'], 'ace'))
             kwargs['evaluation'] = evaluation
             kwargs['evaluation_thermal'] = evaluation_thermal
             make_ace_thermal(filename, filename_thermal, temperatures, **kwargs)

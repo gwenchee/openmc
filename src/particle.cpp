@@ -1,8 +1,9 @@
 #include "openmc/particle.h"
 
 #include <algorithm> // copy, min
-#include <cmath>     // log, abs, copysign
-#include <sstream>
+#include <cmath>     // log, abs
+
+#include <fmt/core.h>
 
 #include "openmc/bank.h"
 #include "openmc/capi.h"
@@ -20,6 +21,7 @@
 #include "openmc/physics_mg.h"
 #include "openmc/random_lcg.h"
 #include "openmc/settings.h"
+#include "openmc/source.h"
 #include "openmc/surface.h"
 #include "openmc/simulation.h"
 #include "openmc/tallies/derivative.h"
@@ -154,7 +156,7 @@ Particle::event_calculate_xs()
   // initiate a search for the current cell. This generally happens at the
   // beginning of the history and again for any secondary particles
   if (coord_[n_coord_ - 1].cell == C_NONE) {
-    if (!find_cell(this, false)) {
+    if (!find_cell(*this, false)) {
       this->mark_as_lost("Could not find the cell containing particle "
         + std::to_string(id_));
       return;
@@ -167,7 +169,7 @@ Particle::event_calculate_xs()
   // Write particle track.
   if (write_track_) write_particle_track(*this);
 
-  if (settings::check_overlaps) check_cell_overlap(this);
+  if (settings::check_overlaps) check_cell_overlap(*this);
 
   // Calculate microscopic and macroscopic cross sections
   if (material_ != MATERIAL_VOID) {
@@ -199,7 +201,7 @@ void
 Particle::event_advance()
 {
   // Find the distance to the nearest boundary
-  boundary_ = distance_to_boundary(this);
+  boundary_ = distance_to_boundary(*this);
 
   // Sample a distance to collision
   if (type_ == Particle::Type::electron ||
@@ -221,7 +223,7 @@ Particle::event_advance()
 
   // Score track-length tallies
   if (!model::active_tracklength_tallies.empty()) {
-    score_tracklength_tally(this, distance);
+    score_tracklength_tally(*this, distance);
   }
 
   // Score track-length estimate of k-eff
@@ -232,10 +234,10 @@ Particle::event_advance()
 
   // Score flux derivative accumulators for differential tallies.
   if (!model::active_tallies.empty()) {
-    score_track_derivative(this, distance);
+    score_track_derivative(*this, distance);
   }
 }
-  
+
 void
 Particle::event_cross_surface()
 {
@@ -253,7 +255,7 @@ Particle::event_cross_surface()
       boundary_.lattice_translation[1] != 0 ||
       boundary_.lattice_translation[2] != 0) {
     // Particle crosses lattice boundary
-    cross_lattice(this, boundary_);
+    cross_lattice(*this, boundary_);
     event_ = TallyEvent::LATTICE;
   } else {
     // Particle crosses surface
@@ -262,7 +264,7 @@ Particle::event_cross_surface()
   }
   // Score cell to cell partial currents
   if (!model::active_surface_tallies.empty()) {
-    score_surface_tally(this, model::active_surface_tallies);
+    score_surface_tally(*this, model::active_surface_tallies);
   }
 }
 
@@ -281,26 +283,26 @@ Particle::event_collide()
   // pre-collision direction to figure out what mesh surfaces were crossed
 
   if (!model::active_meshsurf_tallies.empty())
-    score_surface_tally(this, model::active_meshsurf_tallies);
+    score_surface_tally(*this, model::active_meshsurf_tallies);
 
   // Clear surface component
   surface_ = 0;
 
   if (settings::run_CE) {
-    collision(this);
+    collision(*this);
   } else {
-    collision_mg(this);
+    collision_mg(*this);
   }
 
   // Score collision estimator tallies -- this is done after a collision
   // has occurred rather than before because we need information on the
   // outgoing energy for any tallies with an outgoing energy filter
-  if (!model::active_collision_tallies.empty()) score_collision_tally(this);
+  if (!model::active_collision_tallies.empty()) score_collision_tally(*this);
   if (!model::active_analog_tallies.empty()) {
     if (settings::run_CE) {
-      score_analog_tally_ce(this);
+      score_analog_tally_ce(*this);
     } else {
-      score_analog_tally_mg(this);
+      score_analog_tally_mg(*this);
     }
   }
 
@@ -335,7 +337,7 @@ Particle::event_collide()
   }
 
   // Score flux derivative accumulators for differential tallies.
-  if (!model::active_tallies.empty()) score_collision_derivative(this);
+  if (!model::active_tallies.empty()) score_collision_derivative(*this);
 }
 
 void
@@ -427,7 +429,7 @@ Particle::cross_surface()
       // physically moving the particle forward slightly
 
       this->r() += TINY_BIT * this->u();
-      score_surface_tally(this, model::active_meshsurf_tallies);
+      score_surface_tally(*this, model::active_meshsurf_tallies);
     }
 
     // Score to global leakage tally
@@ -460,14 +462,14 @@ Particle::cross_surface()
     // with a mesh boundary
 
     if (!model::active_surface_tallies.empty()) {
-      score_surface_tally(this, model::active_surface_tallies);
+      score_surface_tally(*this, model::active_surface_tallies);
     }
 
 
     if (!model::active_meshsurf_tallies.empty()) {
       Position r {this->r()};
       this->r() -= TINY_BIT * this->u();
-      score_surface_tally(this, model::active_meshsurf_tallies);
+      score_surface_tally(*this, model::active_meshsurf_tallies);
       this->r() = r;
     }
 
@@ -488,7 +490,7 @@ Particle::cross_surface()
     // (unless we're using a dagmc model, which has exactly one universe)
     if (!settings::dagmc) {
       n_coord_ = 1;
-      if (!find_cell(this, true)) {
+      if (!find_cell(*this, true)) {
         this->mark_as_lost("Couldn't find particle after reflecting from surface "
                            + std::to_string(surf->id_) + ".");
         return;
@@ -522,7 +524,7 @@ Particle::cross_surface()
     if (!model::active_meshsurf_tallies.empty()) {
       Position r {this->r()};
       this->r() -= TINY_BIT * this->u();
-      score_surface_tally(this, model::active_meshsurf_tallies);
+      score_surface_tally(*this, model::active_meshsurf_tallies);
       this->r() = r;
     }
 
@@ -538,12 +540,12 @@ Particle::cross_surface()
     // TODO: off-by-one
     surface_ = rotational ?
       surf_p->i_periodic_ + 1 :
-      std::copysign(surf_p->i_periodic_ + 1, surface_);
+      ((surface_ > 0) ? surf_p->i_periodic_ + 1 : -(surf_p->i_periodic_ + 1));
 
     // Figure out what cell particle is in now
     n_coord_ = 1;
 
-    if (!find_cell(this, true)) {
+    if (!find_cell(*this, true)) {
       this->mark_as_lost("Couldn't find particle after hitting periodic "
         "boundary on surface " + std::to_string(surf->id_) + ".");
       return;
@@ -581,7 +583,7 @@ Particle::cross_surface()
   }
 #endif
 
-  if (find_cell(this, true)) return;
+  if (find_cell(*this, true)) return;
 
   // ==========================================================================
   // COULDN'T FIND PARTICLE IN NEIGHBORING CELLS, SEARCH ALL CELLS
@@ -589,7 +591,7 @@ Particle::cross_surface()
   // Remove lower coordinate levels and assignment of surface
   surface_ = 0;
   n_coord_ = 1;
-  bool found = find_cell(this, false);
+  bool found = find_cell(*this, false);
 
   if (settings::run_mode != RunMode::PLOTTING && (!found)) {
     // If a cell is still not found, there are two possible causes: 1) there is
@@ -603,7 +605,7 @@ Particle::cross_surface()
     // Couldn't find next cell anywhere! This probably means there is an actual
     // undefined region in the geometry.
 
-    if (!find_cell(this, false)) {
+    if (!find_cell(*this, false)) {
       this->mark_as_lost("After particle " + std::to_string(id_) +
         " crossed surface " + std::to_string(surf->id_) +
         " it could not be located in any cell and it did not leak.");
@@ -630,8 +632,8 @@ Particle::mark_as_lost(const char* message)
 
   // Abort the simulation if the maximum number of lost particles has been
   // reached
-  if (simulation::n_lost_particles >= MAX_LOST_PARTICLES &&
-      simulation::n_lost_particles >= REL_MAX_LOST_PARTICLES*n) {
+  if (simulation::n_lost_particles >= settings::max_lost_particles &&
+      simulation::n_lost_particles >= settings::rel_max_lost_particles*n) {
     fatal_error("Maximum number of lost particles has been reached.");
   }
 }
@@ -643,14 +645,13 @@ Particle::write_restart() const
   if (settings::run_mode == RunMode::PARTICLE) return;
 
   // Set up file name
-  std::stringstream filename;
-  filename << settings::path_output << "particle_" << simulation::current_batch
-    << '_' << id_ << ".h5";
+  auto filename = fmt::format("{}particle_{}_{}.h5", settings::path_output,
+    simulation::current_batch, id_);
 
   #pragma omp critical (WriteParticleRestart)
   {
     // Create file
-    hid_t file_id = file_open(filename.str(), 'w');
+    hid_t file_id = file_open(filename, 'w');
 
     // Write filetype and version info
     write_attribute(file_id, "filetype", "particle restart");
@@ -675,19 +676,65 @@ Particle::write_restart() const
       case RunMode::PARTICLE:
         write_dataset(file_id, "run_mode", "particle restart");
         break;
+      default:
+        break;
     }
     write_dataset(file_id, "id", id_);
     write_dataset(file_id, "type", static_cast<int>(type_));
 
     int64_t i = current_work_;
-    write_dataset(file_id, "weight", simulation::source_bank[i-1].wgt);
-    write_dataset(file_id, "energy", simulation::source_bank[i-1].E);
-    write_dataset(file_id, "xyz", simulation::source_bank[i-1].r);
-    write_dataset(file_id, "uvw", simulation::source_bank[i-1].u);
+    if (settings::run_mode == RunMode::EIGENVALUE) {
+      //take source data from primary bank for eigenvalue simulation
+      write_dataset(file_id, "weight", simulation::source_bank[i-1].wgt);
+      write_dataset(file_id, "energy", simulation::source_bank[i-1].E);
+      write_dataset(file_id, "xyz", simulation::source_bank[i-1].r);
+      write_dataset(file_id, "uvw", simulation::source_bank[i-1].u);
+    } else if (settings::run_mode == RunMode::FIXED_SOURCE) {
+      // re-sample using rng random number seed used to generate source particle
+      int64_t id = (simulation::total_gen + overall_generation() - 1)*settings::n_particles +
+        simulation::work_index[mpi::rank] + i;
+      uint64_t seed = init_seed(id, STREAM_SOURCE);
+      // re-sample source site
+      auto site = sample_external_source(&seed);
+      write_dataset(file_id, "weight", site.wgt);
+      write_dataset(file_id, "energy", site.E);
+      write_dataset(file_id, "xyz", site.r);
+      write_dataset(file_id, "uvw", site.u);
+    }
 
     // Close file
     file_close(file_id);
   } // #pragma omp critical
+}
+
+std::string particle_type_to_str(Particle::Type type)
+{
+  switch (type) {
+    case Particle::Type::neutron:
+      return "neutron";
+    case Particle::Type::photon:
+      return "photon";
+    case Particle::Type::electron:
+      return "electron";
+    case Particle::Type::positron:
+      return "positron";
+  }
+  UNREACHABLE();
+}
+
+Particle::Type str_to_particle_type(std::string str)
+{
+  if (str == "neutron") {
+    return Particle::Type::neutron;
+  } else if (str == "photon") {
+    return Particle::Type::photon;
+  } else if (str == "electron") {
+    return Particle::Type::electron;
+  } else if (str == "positron") {
+    return Particle::Type::positron;
+  } else {
+    throw std::invalid_argument{fmt::format("Invalid particle name: {}", str)};
+  }
 }
 
 } // namespace openmc

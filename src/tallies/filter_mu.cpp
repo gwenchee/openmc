@@ -1,6 +1,6 @@
 #include "openmc/tallies/filter_mu.h"
 
-#include <sstream>
+#include <fmt/core.h>
 
 #include "openmc/error.h"
 #include "openmc/search.h"
@@ -49,11 +49,11 @@ MuFilter::set_bins(gsl::span<double> bins)
 }
 
 void
-MuFilter::get_all_bins(const Particle* p, TallyEstimator estimator, FilterMatch& match)
+MuFilter::get_all_bins(const Particle& p, TallyEstimator estimator, FilterMatch& match)
 const
 {
-  if (p->mu_ >= bins_.front() && p->mu_ <= bins_.back()) {
-    auto bin = lower_bound_index(bins_.begin(), bins_.end(), p->mu_);
+  if (p.mu_ >= bins_.front() && p.mu_ <= bins_.back()) {
+    auto bin = lower_bound_index(bins_.begin(), bins_.end(), p.mu_);
     match.bins_.push_back(bin);
     match.weights_.push_back(1.0);
   }
@@ -69,9 +69,7 @@ MuFilter::to_statepoint(hid_t filter_group) const
 std::string
 MuFilter::text_label(int bin) const
 {
-  std::stringstream out;
-  out << "Change-in-Angle [" << bins_[bin] << ", " << bins_[bin+1] << ")";
-  return out.str();
+  return fmt::format("Change-in-Angle [{}, {})", bins_[bin], bins_[bin+1]);
 }
 
 } // namespace openmc

@@ -1,6 +1,6 @@
 #include "openmc/tallies/filter_material.h"
 
-#include <sstream>
+#include <fmt/core.h>
 
 #include "openmc/capi.h"
 #include "openmc/material.h"
@@ -16,10 +16,8 @@ MaterialFilter::from_xml(pugi::xml_node node)
   for (auto& m : mats) {
     auto search = model::material_map.find(m);
     if (search == model::material_map.end()) {
-      std::stringstream err_msg;
-      err_msg << "Could not find material " << m
-              << " specified on tally filter.";
-      throw std::runtime_error{err_msg.str()};
+      throw std::runtime_error{fmt::format(
+        "Could not find material {} specified on tally filter.", m)};
     }
     m = search->second;
   }
@@ -47,10 +45,10 @@ MaterialFilter::set_materials(gsl::span<const int32_t> materials)
 }
 
 void
-MaterialFilter::get_all_bins(const Particle* p, TallyEstimator estimator,
+MaterialFilter::get_all_bins(const Particle& p, TallyEstimator estimator,
                              FilterMatch& match) const
 {
-  auto search = map_.find(p->material_);
+  auto search = map_.find(p.material_);
   if (search != map_.end()) {
     match.bins_.push_back(search->second);
     match.weights_.push_back(1.0);
@@ -69,7 +67,7 @@ MaterialFilter::to_statepoint(hid_t filter_group) const
 std::string
 MaterialFilter::text_label(int bin) const
 {
-  return "Material " + std::to_string(model::materials[materials_[bin]]->id_);
+  return fmt::format("Material {}", model::materials[materials_[bin]]->id_);
 }
 
 //==============================================================================

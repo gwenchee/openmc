@@ -10,6 +10,7 @@ from warnings import warn
 # pp. 293-306 (2013). The "representative isotopic abundance" values from
 # column 9 are used except where an interval is given, in which case the
 # "best measurement" is used.
+# Note that the abundances are given as atomic fractions!
 NATURAL_ABUNDANCE = {
     'H1': 0.99984426, 'H2': 0.00015574, 'He3': 0.000002,
     'He4': 0.999998, 'Li6': 0.07589, 'Li7': 0.92411,
@@ -110,6 +111,49 @@ NATURAL_ABUNDANCE = {
     'U238': 0.992742
 }
 
+# Dictionary to give element symbols from IUPAC names
+# (and some common mispellings)
+ELEMENT_SYMBOL = {'neutron': 'n', 'hydrogen': 'H', 'helium': 'He',
+                 'lithium': 'Li', 'beryllium': 'Be', 'boron': 'B',
+                 'carbon': 'C', 'nitrogen': 'N', 'oxygen': 'O', 'fluorine': 'F',
+                 'neon': 'Ne', 'sodium': 'Na', 'magnesium': 'Mg',
+                 'aluminium': 'Al', 'aluminum': 'Al', 'silicon': 'Si',
+                 'phosphorus': 'P', 'sulfur': 'S', 'sulphur': 'S',
+                 'chlorine': 'Cl', 'argon': 'Ar', 'potassium': 'K',
+                 'calcium': 'Ca', 'scandium': 'Sc', 'titanium': 'Ti',
+                 'vanadium': 'V', 'chromium': 'Cr', 'manganese': 'Mn',
+                 'iron': 'Fe', 'cobalt': 'Co', 'nickel': 'Ni', 'copper': 'Cu',
+                 'zinc': 'Zn', 'gallium': 'Ga', 'germanium': 'Ge',
+                 'arsenic': 'As', 'selenium': 'Se', 'bromine': 'Br',
+                 'krypton': 'Kr', 'rubidium': 'Rb', 'strontium': 'Sr',
+                 'yttrium': 'Y', 'zirconium': 'Zr', 'niobium': 'Nb',
+                 'molybdenum': 'Mo', 'technetium': 'Tc', 'ruthenium': 'Ru',
+                 'rhodium': 'Rh', 'palladium': 'Pd', 'silver': 'Ag',
+                 'cadmium': 'Cd', 'indium': 'In', 'tin': 'Sn', 'antimony': 'Sb',
+                 'tellurium': 'Te', 'iodine': 'I', 'xenon': 'Xe',
+                 'caesium': 'Cs', 'cesium': 'Cs', 'barium': 'Ba',
+                 'lanthanum': 'La', 'cerium': 'Ce', 'praseodymium': 'Pr',
+                 'neodymium': 'Nd', 'promethium': 'Pm', 'samarium': 'Sm',
+                 'europium': 'Eu', 'gadolinium': 'Gd', 'terbium': 'Tb',
+                 'dysprosium': 'Dy', 'holmium': 'Ho', 'erbium': 'Er',
+                 'thulium': 'Tm', 'ytterbium': 'Yb', 'lutetium': 'Lu',
+                 'hafnium': 'Hf', 'tantalum': 'Ta', 'tungsten': 'W',
+                 'wolfram': 'W', 'rhenium': 'Re', 'osmium': 'Os',
+                 'iridium': 'Ir', 'platinum': 'Pt', 'gold': 'Au',
+                 'mercury': 'Hg', 'thallium': 'Tl', 'lead': 'Pb',
+                 'bismuth': 'Bi', 'polonium': 'Po', 'astatine': 'At',
+                 'radon': 'Rn', 'francium': 'Fr', 'radium': 'Ra',
+                 'actinium': 'Ac', 'thorium': 'Th', 'protactinium': 'Pa',
+                 'uranium': 'U', 'neptunium': 'Np', 'plutonium': 'Pu',
+                 'americium': 'Am', 'curium': 'Cm', 'berkelium': 'Bk',
+                 'californium': 'Cf', 'einsteinium': 'Es', 'fermium': 'Fm',
+                 'mendelevium': 'Md', 'nobelium': 'No', 'lawrencium': 'Lr',
+                 'rutherfordium': 'Rf', 'dubnium': 'Db', 'seaborgium': 'Sg',
+                 'bohrium': 'Bh', 'hassium': 'Hs', 'meitnerium': 'Mt',
+                 'darmstadtium': 'Ds', 'roentgenium': 'Rg', 'copernicium': 'Cn',
+                 'nihonium': 'Nh', 'flerovium': 'Fl', 'moscovium': 'Mc',
+                 'livermorium': 'Lv', 'tennessine': 'Ts', 'oganesson': 'Og'}
+
 ATOMIC_SYMBOL = {0: 'n', 1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C',
                  7: 'N', 8: 'O', 9: 'F', 10: 'Ne', 11: 'Na', 12: 'Mg', 13: 'Al',
                  14: 'Si', 15: 'P', 16: 'S', 17: 'Cl', 18: 'Ar', 19: 'K',
@@ -133,8 +177,26 @@ ATOMIC_SYMBOL = {0: 'n', 1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C',
                  118: 'Og'}
 ATOMIC_NUMBER = {value: key for key, value in ATOMIC_SYMBOL.items()}
 
+# Values here are from the Committee on Data for Science and Technology
+# (CODATA) 2014 recommendation (doi:10.1103/RevModPhys.88.035009).
+
+# The value of the Boltzman constant in units of eV / K
+K_BOLTZMANN = 8.6173303e-5
+
+# Unit conversions
+EV_PER_MEV = 1.0e6
+JOULE_PER_EV = 1.6021766208e-19
+
+# Avogadro's constant
+AVOGADRO = 6.022140857e23
+
+# Neutron mass in units of amu
+NEUTRON_MASS = 1.00866491588
+
+# Used in atomic_mass function as a cache
 _ATOMIC_MASS = {}
 
+# Regex for GND nuclide names (used in zam function)
 _GND_NAME_RE = re.compile(r'([A-Zn][a-z]*)(\d+)((?:_[em]\d+)?)')
 
 
@@ -246,12 +308,14 @@ def water_density(temperature, pressure=0.1013):
     # but they only use 3 digits for their conversion to K.)
     if pressure > 100.0:
         warn("Results are not valid for pressures above 100 MPa.")
-    if pressure < 0.0:
-        warn("Results are not valid for pressures below zero.")
+    elif pressure < 0.0:
+        raise ValueError("Pressure must be positive.")
     if temperature < 273:
         warn("Results are not valid for temperatures below 273.15 K.")
-    if temperature > 623.15:
+    elif temperature > 623.15:
         warn("Results are not valid for temperatures above 623.15 K.")
+    elif temperature <= 0.0:
+        raise ValueError('Temperature must be positive.')
 
     # IAPWS region 4 parameters
     n4 = [0.11670521452767e4, -0.72421316703206e6, -0.17073846940092e2,
@@ -366,20 +430,3 @@ def zam(name):
 
     metastable = int(state[2:]) if state else 0
     return (ATOMIC_NUMBER[symbol], int(A), metastable)
-
-
-# Values here are from the Committee on Data for Science and Technology
-# (CODATA) 2014 recommendation (doi:10.1103/RevModPhys.88.035009).
-
-# The value of the Boltzman constant in units of eV / K
-K_BOLTZMANN = 8.6173303e-5
-
-# Unit conversions
-EV_PER_MEV = 1.0e6
-JOULE_PER_EV = 1.6021766208e-19
-
-# Avogadro's constant
-AVOGADRO = 6.022140857e23
-
-# Neutron mass in units of amu
-NEUTRON_MASS = 1.00866491588

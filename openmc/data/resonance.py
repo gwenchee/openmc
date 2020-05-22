@@ -1,4 +1,3 @@
-from collections import defaultdict
 from collections.abc import MutableSequence, Iterable
 import io
 
@@ -6,6 +5,7 @@ import numpy as np
 from numpy.polynomial import Polynomial
 import pandas as pd
 
+import openmc.checkvalue as cv
 from .data import NEUTRON_MASS
 from .endf import get_head_record, get_cont_record, get_tab1_record, get_list_record
 try:
@@ -14,10 +14,9 @@ try:
     _reconstruct = True
 except ImportError:
     _reconstruct = False
-import openmc.checkvalue as cv
 
 
-class Resonances(object):
+class Resonances:
     """Resolved and unresolved resonance data
 
     Parameters
@@ -119,7 +118,7 @@ class Resonances(object):
         return cls(ranges)
 
 
-class ResonanceRange(object):
+class ResonanceRange:
     """Resolved resonance range
 
     Parameters
@@ -867,7 +866,7 @@ class RMatrixLimited(ResonanceRange):
         return rml
 
 
-class ParticlePair(object):
+class ParticlePair:
     def __init__(self, first, second, q_value, penetrability,
                  shift, mt):
         self.first = first
@@ -878,7 +877,7 @@ class ParticlePair(object):
         self.mt = mt
 
 
-class SpinGroup(object):
+class SpinGroup:
     """Resonance spin group
 
     Attributes

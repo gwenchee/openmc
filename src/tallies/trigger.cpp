@@ -1,8 +1,9 @@
 #include "openmc/tallies/trigger.h"
 
 #include <cmath>
-#include <sstream>
 #include <utility> // for std::pair
+
+#include <fmt/core.h>
 
 #include "openmc/capi.h"
 #include "openmc/constants.h"
@@ -60,6 +61,9 @@ check_tally_triggers(double& ratio, int& tally_id, int& score)
     if (t.n_realizations_ < 2) continue;
 
     for (const auto& trigger : t.triggers_) {
+      // Skip trigger if it is not active
+      if (trigger.metric == TriggerMetric::not_active) continue;
+
       const auto& results = t.results_;
       for (auto filter_index = 0; filter_index < results.shape()[0];
            ++filter_index) {
@@ -82,9 +86,6 @@ check_tally_triggers(double& ratio, int& tally_id, int& score)
               break;
             case TriggerMetric::relative_error:
               uncertainty = rel_err;
-              break;
-            case TriggerMetric::not_active:
-              uncertainty = 0.0;
               break;
           }
 
@@ -170,13 +171,14 @@ check_triggers()
 
   // At least one trigger is unsatisfied.  Let the user know which one.
   simulation::satisfy_triggers = false;
-  std::stringstream msg;
-  msg << "Triggers unsatisfied, max unc./thresh. is ";
+  std::string msg;
   if (keff_ratio >= tally_ratio) {
-    msg << keff_ratio << " for eigenvalue";
+    msg = fmt::format("Triggers unsatisfied, max unc./thresh. is {} for "
+      "eigenvalue", keff_ratio);
   } else {
-    msg << tally_ratio << " for " << reaction_name(score) << " in tally "
-        << tally_id;
+    msg = fmt::format(
+      "Triggers unsatisfied, max unc./thresh. is {} for {} in tally {}",
+      tally_ratio, reaction_name(score), tally_id);
   }
   write_message(msg, 7);
 
@@ -189,10 +191,10 @@ check_triggers()
     auto n_pred_batches = static_cast<int>(n_active * max_ratio * max_ratio)
       + settings::n_inactive + 1;
 
-    std::stringstream msg;
-    msg << "The estimated number of batches is " << n_pred_batches;
+    std::string msg = fmt::format("The estimated number of batches is {}",
+      n_pred_batches);
     if (n_pred_batches > settings::n_max_batches) {
-      msg << " --- greater than max batches";
+      msg.append(" --- greater than max batches");
       warning(msg);
     } else {
       write_message(msg, 7);

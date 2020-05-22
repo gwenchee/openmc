@@ -149,11 +149,17 @@ def test_fission_yield_distribution():
     # __getitem__ return yields as a view into yield matrix
     assert orig_yields.yields.base is yield_dist.yield_matrix
 
-    # Fission yield feature uses scaled and incremented
+    # Scale and increment fission yields
     mod_yields = orig_yields * 2
     assert numpy.array_equal(orig_yields.yields * 2, mod_yields.yields)
     mod_yields += orig_yields
     assert numpy.array_equal(orig_yields.yields * 3, mod_yields.yields)
+
+    mod_yields = 2.0 * orig_yields
+    assert numpy.array_equal(orig_yields.yields * 2, mod_yields.yields)
+
+    mod_yields = numpy.float64(2.0) * orig_yields
+    assert numpy.array_equal(orig_yields.yields * 2, mod_yields.yields)
 
     # Failure modes for adding, multiplying yields
     similar = numpy.empty_like(orig_yields.yields)
@@ -170,6 +176,21 @@ def test_fission_yield_distribution():
     with pytest.raises(TypeError):
         orig_yields *= similar
 
+    # Test restriction of fission products
+    strict_restrict = yield_dist.restrict_products(["Xe135", "Sm149"])
+    with_extras = yield_dist.restrict_products(
+        ["Xe135", "Sm149", "H1", "U235"])
+
+    assert strict_restrict.products == ("Sm149", "Xe135")
+    assert strict_restrict.energies == yield_dist.energies
+    assert with_extras.products == ("Sm149", "Xe135")
+    assert with_extras.energies == yield_dist.energies
+    for ene, new_yields in strict_restrict.items():
+        for product in strict_restrict.products:
+            assert new_yields[product] == yield_dist[ene][product]
+            assert with_extras[ene][product] == yield_dist[ene][product]
+
+    assert yield_dist.restrict_products(["U235"]) is None
 
 def test_validate():
 

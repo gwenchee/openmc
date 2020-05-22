@@ -34,12 +34,6 @@ namespace openmc {
 // use to store the bins for delayed group tallies.
 constexpr int MAX_DELAYED_GROUPS {8};
 
-// Maximum number of lost particles
-constexpr int MAX_LOST_PARTICLES {10};
-
-// Maximum number of lost particles, relative to the total number of particles
-constexpr double REL_MAX_LOST_PARTICLES {1.0e-6};
-
 constexpr double CACHE_INVALID {-1.0};
 
 //==============================================================================
@@ -163,7 +157,7 @@ public:
   };
 
   //! Saved ("banked") state of a particle
-  //! NOTE: This structure's MPI type is built in initialize_mpi() of 
+  //! NOTE: This structure's MPI type is built in initialize_mpi() of
   //! initialize.cpp. Any changes made to the struct here must also be
   //! made when building the Bank MPI type in initialize_mpi().
   //! NOTE: This structure is also used on the python side, and is defined
@@ -179,7 +173,7 @@ public:
     int64_t parent_id;
     int64_t progeny_id;
   };
-  
+
   //! Saved ("banked") state of a particle, for nu-fission tallying
   struct NuBank {
     double E;  //!< particle energy
@@ -317,7 +311,7 @@ public:
   int cell_born_ {-1};      //!< index for cell particle was born in
   int material_ {-1};       //!< index for current material
   int material_last_ {-1};  //!< index for last material
-  
+
   // Boundary information
   BoundaryInfo boundary_;
 
@@ -334,7 +328,7 @@ public:
   // Current PRNG state
   uint64_t seeds_[N_STREAMS]; // current seeds
   int      stream_;           // current RNG stream
-  
+
   // Secondary particle bank
   std::vector<Particle::Bank> secondary_bank_;
 
@@ -368,6 +362,14 @@ public:
 
   int64_t n_progeny_ {0}; // Number of progeny produced by this particle
 };
+
+//============================================================================
+//! Functions
+//============================================================================
+
+std::string particle_type_to_str(Particle::Type type);
+
+Particle::Type str_to_particle_type(std::string str);
 
 } // namespace openmc
 

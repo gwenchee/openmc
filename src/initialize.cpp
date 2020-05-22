@@ -3,13 +3,13 @@
 #include <cstddef>
 #include <cstdlib> // for getenv
 #include <cstring>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+#include <fmt/core.h>
 
 #include "openmc/capi.h"
 #include "openmc/constants.h"
@@ -78,6 +78,7 @@ int openmc_init(int argc, char* argv[], const void* intracomm)
 
   // Stop initialization timer
   simulation::time_initialize.stop();
+  simulation::time_total.stop();
 
   return 0;
 }
@@ -110,7 +111,9 @@ void initialize_mpi(MPI_Comm intracomm)
   MPI_Get_address(&b.particle, &disp[5]);
   MPI_Get_address(&b.parent_id, &disp[6]);
   MPI_Get_address(&b.progeny_id, &disp[7]);
-  for (int i = 7; i >= 0; --i) disp[i] -= disp[0];
+  for (int i = 7; i >= 0; --i) {
+    disp[i] -= disp[0];
+  }
 
   int blocks[] {3, 3, 1, 1, 1, 1, 1, 1};
   MPI_Datatype types[] {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_INT, MPI_INT, MPI_LONG, MPI_LONG};
@@ -134,7 +137,7 @@ parse_command_line(int argc, char* argv[])
       } else if (arg == "-n" || arg == "--particles") {
         i += 1;
         settings::n_particles = std::stoll(argv[i]);
-      
+
       } else if (arg == "-e" || arg == "--event") {
         settings::event_based = true;
 
@@ -155,9 +158,8 @@ parse_command_line(int argc, char* argv[])
           settings::path_particle_restart = argv[i];
           settings::particle_restart_run = true;
         } else {
-          std::stringstream msg;
-          msg << "Unrecognized file after restart flag: " << filetype << ".";
-          strcpy(openmc_err_msg, msg.str().c_str());
+          auto msg = fmt::format("Unrecognized file after restart flag: {}.", filetype);
+          strcpy(openmc_err_msg, msg.c_str());
           return OPENMC_E_INVALID_ARGUMENT;
         }
 
@@ -208,8 +210,9 @@ parse_command_line(int argc, char* argv[])
         }
         omp_set_num_threads(n_threads);
 #else
-        if (mpi::master)
+        if (mpi::master) {
           warning("Ignoring number of threads specified on command line.");
+        }
 #endif
 
       } else if (arg == "-?" || arg == "-h" || arg == "--help") {
@@ -224,7 +227,7 @@ parse_command_line(int argc, char* argv[])
         settings::write_all_tracks = true;
 
       } else {
-        std::cerr << "Unknown option: " << argv[i] << '\n';
+        fmt::print(stderr, "Unknown option: {}\n", argv[i]);
         print_usage();
         return OPENMC_E_UNASSIGNED;
       }

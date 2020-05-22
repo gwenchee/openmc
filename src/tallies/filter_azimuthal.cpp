@@ -1,7 +1,8 @@
 #include "openmc/tallies/filter_azimuthal.h"
 
 #include <cmath>
-#include <sstream>
+
+#include <fmt/core.h>
 
 #include "openmc/constants.h"
 #include "openmc/error.h"
@@ -50,15 +51,11 @@ void AzimuthalFilter::set_bins(gsl::span<double> bins)
 }
 
 void
-AzimuthalFilter::get_all_bins(const Particle* p, TallyEstimator estimator,
+AzimuthalFilter::get_all_bins(const Particle& p, TallyEstimator estimator,
                               FilterMatch& match) const
 {
-  double phi;
-  if (estimator == TallyEstimator::TRACKLENGTH) {
-    phi = std::atan2(p->u().y, p->u().x);
-  } else {
-    phi = std::atan2(p->u_last_.y, p->u_last_.x);
-  }
+  Direction u = (estimator == TallyEstimator::TRACKLENGTH) ? p.u() : p.u_last_;
+  double phi = std::atan2(u.y, u.x);
 
   if (phi >= bins_.front() && phi <= bins_.back()) {
     auto bin = lower_bound_index(bins_.begin(), bins_.end(), phi);
@@ -77,9 +74,7 @@ AzimuthalFilter::to_statepoint(hid_t filter_group) const
 std::string
 AzimuthalFilter::text_label(int bin) const
 {
-  std::stringstream out;
-  out << "Azimuthal Angle [" << bins_[bin] << ", " << bins_[bin+1] << ")";
-  return out.str();
+  return fmt::format("Azimuthal Angle [{}, {})", bins_.at(bin), bins_.at(bin+1));
 }
 
 } // namespace openmc

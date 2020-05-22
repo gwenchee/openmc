@@ -2,6 +2,9 @@
 
 #include <utility>  // For pair
 
+#include <fmt/core.h>
+#include <gsl/gsl>
+
 #include "openmc/capi.h"
 #include "openmc/error.h"
 #include "openmc/math_functions.h"
@@ -36,28 +39,28 @@ SphericalHarmonicsFilter::set_cosine(gsl::cstring_span cosine)
   } else if (cosine == "particle") {
     cosine_ = SphericalHarmonicsCosine::particle;
   } else {
-    std::stringstream err_msg;
-    err_msg << "Unrecognized cosine type, \"" << cosine
-            << "\" in spherical harmonics filter";
-    throw std::invalid_argument{err_msg.str()};
+    throw std::invalid_argument{fmt::format("Unrecognized cosine type, \"{}\" "
+      "in spherical harmonics filter", gsl::to_string(cosine))};
   }
 }
 
 void
-SphericalHarmonicsFilter::get_all_bins(const Particle* p, TallyEstimator estimator,
+SphericalHarmonicsFilter::get_all_bins(const Particle& p, TallyEstimator estimator,
                                        FilterMatch& match) const
 {
   // Determine cosine term for scatter expansion if necessary
   std::vector<double> wgt(order_ + 1);
   if (cosine_ == SphericalHarmonicsCosine::scatter) {
-    calc_pn_c(order_, p->mu_, wgt.data());
+    calc_pn_c(order_, p.mu_, wgt.data());
   } else {
-    for (int i = 0; i < order_ + 1; i++) wgt[i] = 1;
+    for (int i = 0; i < order_ + 1; i++) {
+      wgt[i] = 1;
+    }
   }
 
   // Find the Rn,m values
   std::vector<double> rn(n_bins_);
-  calc_rn(order_, p->u_last_, rn.data());
+  calc_rn(order_, p.u_last_, rn.data());
 
   int j = 0;
   for (int n = 0; n < order_ + 1; n++) {
@@ -88,15 +91,14 @@ SphericalHarmonicsFilter::to_statepoint(hid_t filter_group) const
 std::string
 SphericalHarmonicsFilter::text_label(int bin) const
 {
-  std::stringstream out;
+  Expects(bin >= 0 && bin < n_bins_);
   for (int n = 0; n < order_ + 1; n++) {
     if (bin < (n + 1) * (n + 1)) {
       int m = (bin - n*n) - n;
-      out << "Spherical harmonic expansion, Y" << n << "," << m;
-      break;
+      return fmt::format("Spherical harmonic expansion, Y{},{}", n, m);
     }
   }
-  return out.str();
+  UNREACHABLE();
 }
 
 //==============================================================================

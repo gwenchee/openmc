@@ -1,6 +1,6 @@
 #include "openmc/tallies/filter_surface.h"
 
-#include <sstream>
+#include <fmt/core.h>
 
 #include "openmc/error.h"
 #include "openmc/surface.h"
@@ -17,10 +17,8 @@ SurfaceFilter::from_xml(pugi::xml_node node)
   for (auto& s : surfaces) {
     auto search = model::surface_map.find(s);
     if (search == model::surface_map.end()) {
-      std::stringstream err_msg;
-      err_msg << "Could not find surface " << s
-              << " specified on tally filter.";
-      throw std::runtime_error{err_msg.str()};
+      throw std::runtime_error{fmt::format(
+        "Could not find surface {} specified on tally filter.", s)};
     }
 
     s = search->second;
@@ -49,13 +47,13 @@ SurfaceFilter::set_surfaces(gsl::span<int32_t> surfaces)
 }
 
 void
-SurfaceFilter::get_all_bins(const Particle* p, TallyEstimator estimator,
+SurfaceFilter::get_all_bins(const Particle& p, TallyEstimator estimator,
                             FilterMatch& match) const
 {
-  auto search = map_.find(std::abs(p->surface_)-1);
+  auto search = map_.find(std::abs(p.surface_)-1);
   if (search != map_.end()) {
     match.bins_.push_back(search->second);
-    if (p->surface_ < 0) {
+    if (p.surface_ < 0) {
       match.weights_.push_back(-1.0);
     } else {
       match.weights_.push_back(1.0);
@@ -75,7 +73,7 @@ SurfaceFilter::to_statepoint(hid_t filter_group) const
 std::string
 SurfaceFilter::text_label(int bin) const
 {
-  return "Surface " + std::to_string(model::surfaces[surfaces_[bin]]->id_);
+  return fmt::format("Surface {}", model::surfaces[surfaces_[bin]]->id_);
 }
 
 } // namespace openmc

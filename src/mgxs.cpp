@@ -9,6 +9,7 @@
 #include <omp.h>
 #endif
 
+#include <fmt/core.h>
 #include "xtensor/xmath.hpp"
 #include "xtensor/xsort.hpp"
 #include "xtensor/xadapt.hpp"
@@ -81,13 +82,14 @@ Mgxs::metadata_from_hdf5(hid_t xs_id, const std::vector<double>& temperature,
 
   // Determine the available temperatures
   hid_t kT_group = open_group(xs_id, "kTs");
-  int num_temps = get_num_datasets(kT_group);
+  size_t num_temps = get_num_datasets(kT_group);
   char** dset_names = new char*[num_temps];
   for (int i = 0; i < num_temps; i++) {
     dset_names[i] = new char[151];
   }
   get_datasets(kT_group, dset_names);
-  xt::xarray<double> available_temps(num_temps);
+  std::vector<size_t> shape = {num_temps};
+  xt::xarray<double> available_temps(shape);
   for (int i = 0; i < num_temps; i++) {
     read_double(kT_group, dset_names[i], &available_temps[i], true);
 
@@ -121,17 +123,21 @@ Mgxs::metadata_from_hdf5(hid_t xs_id, const std::vector<double>& temperature,
             temps_to_read.push_back(std::round(temp_actual));
           }
         } else {
-          std::stringstream msg;
-          msg << "MGXS library does not contain cross sections for "
-            << in_name << " at or near " << std::round(T) << " K.";
-          fatal_error(msg);
+          fatal_error(fmt::format(
+            "MGXS library does not contain cross sections for {} at or near {} K.",
+            in_name, std::round(T)));
         }
       }
       break;
 
     case TemperatureMethod::INTERPOLATION:
       for (int i = 0; i < temperature.size(); i++) {
-        for (int j = 0; j < num_temps - 1; j++) {
+        for (int j = 0; j < num_temps; j++) {
+          if (j == (num_temps - 1)) {
+            fatal_error("MGXS Library does not contain cross sections for " +
+                  in_name + " at temperatures that bound " +
+                  std::to_string(std::round(temperature[i])));
+          }
           if ((available_temps[j] <= temperature[i]) &&
               (temperature[i] < available_temps[j + 1])) {
             if (std::find(temps_to_read.begin(),
@@ -144,13 +150,10 @@ Mgxs::metadata_from_hdf5(hid_t xs_id, const std::vector<double>& temperature,
                           std::round(available_temps[j + 1])) == temps_to_read.end()) {
               temps_to_read.push_back(std::round((int) available_temps[j + 1]));
             }
-            continue;
+            break;
           }
         }
 
-      fatal_error("MGXS Library does not contain cross sections for " +
-                  in_name + " at temperatures that bound " +
-                  std::to_string(std::round(temperature[i])));
       }
   }
   std::sort(temps_to_read.begin(), temps_to_read.end());
@@ -350,10 +353,9 @@ Mgxs::Mgxs(const std::string& in_name, const std::vector<double>& mat_kTs,
           auto temp_actual = micros[m]->kTs[micro_t[m]];
 
           if (std::abs(temp_actual - temp_desired) >= K_BOLTZMANN * settings::temperature_tolerance) {
-            std::stringstream msg;
-            msg << "MGXS Library does not contain cross section for " << name
-              << " at or near " << std::round(temp_desired / K_BOLTZMANN) << "K.";
-            fatal_error(msg);
+            fatal_error(fmt::format(
+              "MGXS Library does not contain cross section for {} at or near {} K.",
+              name, std::round(temp_desired / K_BOLTZMANN)));
           }
         }
         break;
@@ -382,15 +384,16 @@ Mgxs::Mgxs(const std::string& in_name, const std::vector<double>& mat_kTs,
     // to do the 2nd temperature
     int num_interp_points = 2;
     if (settings::temperature_method == TemperatureMethod::NEAREST) num_interp_points = 1;
+    std::vector<double> interp(micros.size());
+    std::vector<int> temp_indices(micros.size());
     for (int interp_point = 0; interp_point < num_interp_points; interp_point++) {
-      std::vector<double> interp(micros.size());
-      std::vector<double> temp_indices(micros.size());
       for (int m = 0; m < micros.size(); m++) {
         interp[m] = (1. - micro_t_interp[m]) * atom_densities[m];
         temp_indices[m] = micro_t[m] + interp_point;
+        micro_t_interp[m] = 1. - micro_t_interp[m];
       }
 
-      combine(micros, interp, micro_t, t);
+      combine(micros, interp, temp_indices, t);
     } // end loop to sum all micros across the temperatures
   } // end temperature (t) loop
 }

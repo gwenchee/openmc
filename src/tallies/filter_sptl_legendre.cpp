@@ -2,6 +2,8 @@
 
 #include <utility>  // For pair
 
+#include <fmt/core.h>
+
 #include "openmc/capi.h"
 #include "openmc/error.h"
 #include "openmc/math_functions.h"
@@ -53,7 +55,7 @@ SpatialLegendreFilter::set_axis(LegendreAxis axis)
 void
 SpatialLegendreFilter::set_minmax(double min, double max)
 {
-  if (max < min) {
+  if (max <= min) {
     throw std::invalid_argument{"Maximum value must be greater than minimum value"};
   }
   min_ = min;
@@ -61,17 +63,17 @@ SpatialLegendreFilter::set_minmax(double min, double max)
 }
 
 void
-SpatialLegendreFilter::get_all_bins(const Particle* p, TallyEstimator estimator,
+SpatialLegendreFilter::get_all_bins(const Particle& p, TallyEstimator estimator,
                                     FilterMatch& match) const
 {
   // Get the coordinate along the axis of interest.
   double x;
   if (axis_ == LegendreAxis::x) {
-    x = p->r().x;
+    x = p.r().x;
   } else if (axis_ == LegendreAxis::y) {
-    x = p->r().y;
+    x = p.r().y;
   } else {
-    x = p->r().z;
+    x = p.r().z;
   }
 
   if (x >= min_ && x <= max_) {
@@ -107,17 +109,13 @@ SpatialLegendreFilter::to_statepoint(hid_t filter_group) const
 std::string
 SpatialLegendreFilter::text_label(int bin) const
 {
-  std::stringstream out;
-  out << "Legendre expansion, ";
   if (axis_ == LegendreAxis::x) {
-    out << "x";
+    return fmt::format("Legendre expansion, x axis, P{}", bin);
   } else if (axis_ == LegendreAxis::y) {
-    out << "y";
+    return fmt::format("Legendre expansion, y axis, P{}", bin);
   } else {
-    out << "z";
+    return fmt::format("Legendre expansion, z axis, P{}", bin);
   }
-  out << " axis, P" << std::to_string(bin);
-  return out.str();
 }
 
 //==============================================================================

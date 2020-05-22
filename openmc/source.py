@@ -1,27 +1,30 @@
 from numbers import Real
-import sys
 from xml.etree import ElementTree as ET
 
-from openmc._xml import get_text
-from openmc.stats.univariate import Univariate
-from openmc.stats.multivariate import UnitSphere, Spatial
 import openmc.checkvalue as cv
+from openmc.stats.multivariate import UnitSphere, Spatial
+from openmc.stats.univariate import Univariate
+from ._xml import get_text
 
 
-class Source(object):
+class Source:
     """Distribution of phase space coordinates for source sites.
 
     Parameters
     ----------
-    space : openmc.stats.Spatial, optional
+    space : openmc.stats.Spatial
         Spatial distribution of source sites
-    angle : openmc.stats.UnitSphere, optional
+    angle : openmc.stats.UnitSphere
         Angular distribution of source sites
-    energy : openmc.stats.Univariate, optional
+    energy : openmc.stats.Univariate
         Energy distribution of source sites
-    filename : str, optional
+    filename : str
         Source file from which sites should be sampled
-    strength : Real
+    library : str
+        Path to a custom source library
+
+        .. versionadded:: 0.12
+    strength : float
         Strength of the source
     particle : {'neutron', 'photon'}
         Source particle type
@@ -36,7 +39,9 @@ class Source(object):
         Energy distribution of source sites
     file : str or None
         Source file from which sites should be sampled
-    strength : Real
+    library : str or None
+        Path to a custom source library
+    strength : float
         Strength of the source
     particle : {'neutron', 'photon'}
         Source particle type
@@ -44,11 +49,12 @@ class Source(object):
     """
 
     def __init__(self, space=None, angle=None, energy=None, filename=None,
-                 strength=1.0, particle='neutron'):
+                 library=None, strength=1.0, particle='neutron'):
         self._space = None
         self._angle = None
         self._energy = None
         self._file = None
+        self._library = None
 
         if space is not None:
             self.space = space
@@ -58,12 +64,18 @@ class Source(object):
             self.energy = energy
         if filename is not None:
             self.file = filename
+        if library is not None:
+            self.library = library
         self.strength = strength
         self.particle = particle
 
     @property
     def file(self):
         return self._file
+
+    @property
+    def library(self):
+        return self._library
 
     @property
     def space(self):
@@ -89,6 +101,11 @@ class Source(object):
     def file(self, filename):
         cv.check_type('source file', filename, str)
         self._file = filename
+
+    @library.setter
+    def library(self, library_name):
+        cv.check_type('library', library_name, str)
+        self._library = library_name
 
     @space.setter
     def space(self, space):
@@ -131,6 +148,8 @@ class Source(object):
             element.set("particle", self.particle)
         if self.file is not None:
             element.set("file", self.file)
+        if self.library is not None:
+            element.set("library", self.library)
         if self.space is not None:
             element.append(self.space.to_xml_element())
         if self.angle is not None:
@@ -167,6 +186,10 @@ class Source(object):
         filename = get_text(elem, 'file')
         if filename is not None:
             source.file = filename
+
+        library = get_text(elem, 'library')
+        if library is not None:
+            source.library = library
 
         space = elem.find('space')
         if space is not None:
