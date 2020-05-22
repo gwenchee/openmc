@@ -123,13 +123,9 @@ class PredictorIntegrator(Integrator):
             operator with predictor
 
         """
-        print('start timed deplete')
-        print(comm.rank)
-        print('\n')
+        print('start timed deplete '+str(comm.rank))
         proc_time, conc_end = self._timed_deplete(conc, rates, dt)
-        print('end timed deplete')
-        print(comm.rank)
-        print('\n')
+        print('end timed deplete '+str(comm.rank))
         return proc_time, [conc_end], []
 
 
