@@ -1,6 +1,6 @@
 import copy
 from itertools import repeat
-
+from . import comm
 from .abc import Integrator, SIIntegrator, OperatorResult
 from ._matrix_funcs import (
     cf4_f1, cf4_f2, cf4_f3, cf4_f4, celi_f1, celi_f2,
@@ -123,7 +123,13 @@ class PredictorIntegrator(Integrator):
             operator with predictor
 
         """
+        print('start timed deplete')
+        print(comm.rank)
+        print('\n')
         proc_time, conc_end = self._timed_deplete(conc, rates, dt)
+        print('end timed deplete')
+        print(comm.rank)
+        print('\n')
         return proc_time, [conc_end], []
 
 

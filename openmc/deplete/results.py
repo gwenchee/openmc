@@ -467,6 +467,9 @@ class Results:
             processes.
 
         """
+        print('start results save')
+        print(comm.rank)
+        print('\n')
         # Get indexing terms
         vol_dict, nuc_list, burn_list, full_burn_list = op.get_results_info()
 
@@ -491,6 +494,9 @@ class Results:
             results.proc_time = comm.reduce(proc_time, op=MPI.SUM)
 
         results.export_to_hdf5("depletion_results.h5", step_ind)
+        print('end results save')
+        print(comm.rank)
+        print('\n')
 
     def transfer_volumes(self, geometry):
         """Transfers volumes from depletion results to geometry

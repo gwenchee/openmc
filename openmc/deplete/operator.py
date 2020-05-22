@@ -312,6 +312,9 @@ class Operator(TransportOperator):
         openmc.lib.statepoint_write(
             "openmc_simulation_n{}.h5".format(step),
             write_source=False)
+        print('write bos data ')
+        print(comm.rank)
+        print('\n')
 
     def _differentiate_burnable_mats(self):
         """Assign distribmats for each burnable material
