@@ -4,6 +4,7 @@ Provided to avoid some circular imports
 """
 from itertools import repeat
 from multiprocessing import Pool
+from . import comm
 
 
 def deplete(func, chain, x, rates, dt, matrix_func=None):
@@ -44,12 +45,12 @@ def deplete(func, chain, x, rates, dt, matrix_func=None):
             "Number of material fission yield distributions {} is not equal "
             "to the number of compositions {}".format(
                 len(fission_yields), len(x)))
-
+    print('start matrix '+str(comm.rank))
     if matrix_func is None:
         matrices = map(chain.form_matrix, rates, fission_yields)
     else:
         matrices = map(matrix_func, repeat(chain), rates, fission_yields)
-
+    print('end matrix '+str(comm.rank))
     # Use multiprocessing pool to distribute work
     with Pool() as pool:
         inputs = zip(matrices, x, repeat(dt))
