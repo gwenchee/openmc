@@ -12,7 +12,7 @@ import numpy as np
 import openmc
 import openmc.data
 import openmc.checkvalue as cv
-from ._xml import clean_indentation
+from ._xml import clean_indentation, reorder_attributes
 from .mixin import IDManagerMixin
 
 
@@ -654,6 +654,8 @@ class Material(IDManagerMixin):
             if enrichment_target is not None and element == re.sub(r'\d+$', '', enrichment_target):
                 self.add_element(element, percent, percent_type, enrichment,
                                  enrichment_target, enrichment_type)
+            elif enrichment is not None and enrichment_target is None and element == 'U':
+                self.add_element(element, percent, percent_type, enrichment)
             else:
                 self.add_element(element, percent, percent_type)
 
@@ -1077,6 +1079,10 @@ class Material(IDManagerMixin):
         new_density = np.sum([dens for dens in mass_per_cc.values()])
         new_mat.set_density('g/cm3', new_density)
 
+        # If any of the involved materials is depletable, the new material is 
+        # depletable
+        new_mat.depletable = any(mat.depletable for mat in materials)
+
         return new_mat
 
     @classmethod
@@ -1239,6 +1245,7 @@ class Materials(cv.CheckedList):
                 clean_indentation(element, level=1)
                 element.tail = element.tail.strip(' ')
                 fh.write('  ')
+                reorder_attributes(element)  # TODO: Remove when support is Python 3.8+
                 ET.ElementTree(element).write(fh, encoding='unicode')
 
             # Write the <material> elements.
@@ -1247,6 +1254,7 @@ class Materials(cv.CheckedList):
                 clean_indentation(element, level=1)
                 element.tail = element.tail.strip(' ')
                 fh.write('  ')
+                reorder_attributes(element)  # TODO: Remove when support is Python 3.8+
                 ET.ElementTree(element).write(fh, encoding='unicode')
 
             # Write the closing tag for the root element.

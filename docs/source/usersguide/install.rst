@@ -14,31 +14,33 @@ Installing on Linux/Mac with conda-forge
 
 Conda_ is an open source package management system and environment management
 system for installing multiple versions of software packages and their
-dependencies and switching easily between them. `conda-forge
-<https://conda-forge.github.io/>`_ is a community-led conda channel of
-installable packages. For instructions on installing conda, please consult their
-`documentation
-<https://docs.conda.io/projects/conda/en/latest/user-guide/install/>`_.
-
-Once you have `conda` installed on your system, add the `conda-forge` channel to
-your configuration with:
+dependencies and switching easily between them. If you have `conda` installed on
+your system, OpenMC can be installed via the `conda-forge` channel. First, add
+the `conda-forge` channel with:
 
 .. code-block:: sh
 
     conda config --add channels conda-forge
 
-Once the `conda-forge` channel has been enabled, OpenMC can then be installed
-with:
+To list the versions of OpenMC that are available on the `conda-forge` channel,
+in your terminal window or an Anaconda Prompt run:
 
 .. code-block:: sh
 
-    conda install openmc
+    conda search openmc
 
-It is possible to list all of the versions of OpenMC available on your platform with:
+OpenMC can then be installed with:
 
 .. code-block:: sh
 
-    conda search openmc --channel conda-forge
+    conda create -n openmc-env openmc
+
+This will install OpenMC in a conda environment called `openmc-env`. To activate
+the environment, run:
+
+.. code-block:: sh
+
+    conda activate openmc-env
 
 .. _install_ppa:
 
@@ -71,6 +73,86 @@ are no longer supported.
 
 .. _Personal Package Archive: https://launchpad.net/~paulromano/+archive/staging
 .. _APT package manager: https://help.ubuntu.com/community/AptGet/Howto
+
+.. _install-spack:
+
+----------------------------------
+Installing from Source using Spack
+----------------------------------
+
+Spack_ is a package management tool designed to support multiple versions and
+configurations of software on a wide variety of platforms and environments.
+Please follow Spack's `setup guide`_ to configure the Spack system.
+
+The OpenMC Spack recipe has been configured with variants that match most options
+provided in the CMakeLists.txt file. To see a list of these variants and other
+information use:
+
+.. code-block:: sh
+
+    spack info openmc
+
+.. note::
+
+    It should be noted that by default OpenMC builds with ``-O2 -g`` flags which
+    are equivalent to a CMake build type of `RelwithDebInfo`. In addition, MPI
+    is OFF while OpenMP is ON.
+
+It is recommended to install OpenMC with the Python API. Information about this
+Spack recipe can be found with the following command:
+
+.. code-block:: sh
+
+    spack info py-openmc
+
+.. note::
+
+   The only variant for the Python API is ``mpi``.
+
+The most basic installation of OpenMC can be accomplished by entering the following command:
+
+.. code-block::
+
+    spack install py-openmc
+
+.. caution::
+
+    When installing any Spack package, dependencies are assumed to be at configured defaults unless otherwise specfied in the
+    specification on the command line. In the above example, assuming the default options weren't changed in Spack's package
+    configuration, py-openmc will link against a non-optimized non-MPI openmc. Even if an optimized openmc was built separately,
+    it will rebuild openmc with optimization OFF. Thus, if you are trying to link against dependencies that were configured
+    different than defaults, ``^openmc[variants]`` will have to be present in the command.
+
+For a more performant build of OpenMC with optimization turned ON and MPI provided by OpenMPI, the following command can be
+used:
+
+.. code-block:: sh
+
+    spack install py-openmc+mpi ^openmc+optimize ^openmpi
+
+.. note::
+
+   ``+mpi`` is automatically forwarded to OpenMC.
+
+.. tip::
+
+    When installing py-openmc, it will use Spack's preferred Python. For example, assuming Spack's preferred Python
+    is 3.8.7, to build py-openmc against the latest Python 3.7 instead, ``^python@3.7.0:3.7.99`` should be added to the
+    specification on the command line. Additionally, a compiler type and version can be specified at the end of the
+    command using ``%gcc@<version>``, ``%intel@<version>``, etc.
+
+A useful tool in Spack is to look at the dependency tree before installation. This can be observed using
+Spack's `spec` tool:
+
+.. code-block::
+
+    spack spec py-openmc+mpi ^openmc+optimize
+
+Once installed, environment/lmod modules can be generated or Spack's `load` feature
+can be used to access the installed packages. 
+
+.. _Spack: https://spack.readthedocs.io/en/latest/
+.. _setup guide: https://spack.readthedocs.io/en/latest/getting_started.html
 
 .. _install_source:
 
@@ -422,7 +504,7 @@ distributions.
 
    `pandas <http://pandas.pydata.org/>`_
       Pandas is used to generate tally DataFrames as demonstrated in
-      :ref:`examples_pandas` example notebook.
+      an `example notebook <../examples/pandas-dataframes.ipynb>`_.
 
    `h5py <http://www.h5py.org/>`_
       h5py provides Python bindings to the HDF5 library. Since OpenMC outputs
@@ -507,7 +589,6 @@ schemas.xml file in your own OpenMC source directory.
 .. _GNU Emacs: http://www.gnu.org/software/emacs/
 .. _validation: https://en.wikipedia.org/wiki/XML_validation
 .. _RELAX NG: http://relaxng.org/
-.. _NNDC: http://www.nndc.bnl.gov/endf/b7.1/acefiles.html
-.. _ctest: http://www.cmake.org/cmake/help/v2.8.12/ctest.html
-.. _Conda: https://docs.conda.io/en/latest/
+.. _ctest: https://cmake.org/cmake/help/latest/manual/ctest.1.html
+.. _Conda: https://conda.io/en/latest/
 .. _pip: https://pip.pypa.io/en/stable/

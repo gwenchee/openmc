@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.3 FATAL_ERROR)
 project(openmc C CXX)
 
+# Set version numbers
+set(OPENMC_VERSION_MAJOR 0)
+set(OPENMC_VERSION_MINOR 12)
+set(OPENMC_VERSION_RELEASE 1)
+set(OPENMC_VERSION ${OPENMC_VERSION_MAJOR}.${OPENMC_VERSION_MINOR}.${OPENMC_VERSION_RELEASE})
+configure_file(include/openmc/version.h.in "${CMAKE_BINARY_DIR}/include/openmc/version.h" @ONLY)
+
 # Setup output directories
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -30,8 +37,8 @@ option(dagmc    "Enable support for DAGMC (CAD) geometry"        OFF)
 #===============================================================================
 
 set(MPI_ENABLED FALSE)
-if($ENV{CXX} MATCHES "(mpi[^/]*|CC)$")
-  message(STATUS "Detected MPI wrapper: $ENV{CXX}")
+if(${CMAKE_CXX_COMPILER} MATCHES "(mpi[^/]*|CC)$")
+  message(STATUS "Detected MPI wrapper: ${CMAKE_CXX_COMPILER}")
   set(MPI_ENABLED TRUE)
 endif()
 
@@ -40,6 +47,24 @@ endif()
 #===============================================================================
 if(dagmc)
   find_package(DAGMC REQUIRED PATH_SUFFIXES lib/cmake)
+endif()
+
+#===============================================================================
+# Check for submodules perhaps already on system
+#===============================================================================
+
+# If not found, we just pull appropriate versions from github and build them.
+find_package(fmt QUIET NO_SYSTEM_ENVIRONMENT_PATH)
+if(fmt_FOUND)
+  message(STATUS "Found fmt: ${fmt_DIR} (version ${fmt_VERSION})")
+else()
+  message(STATUS "Did not find fmt, will use submodule instead")
+endif()
+find_package(pugixml QUIET NO_SYSTEM_ENVIRONMENT_PATH)
+if(pugixml_FOUND)
+  message(STATUS "Found pugixml: ${pugixml_DIR}")
+else()
+  message(STATUS "Did not find pugixml, will use submodule instead")
 endif()
 
 #===============================================================================
@@ -62,7 +87,9 @@ endif()
 find_package(HDF5 REQUIRED COMPONENTS C HL)
 if(HDF5_IS_PARALLEL)
   if(NOT MPI_ENABLED)
-    message(FATAL_ERROR "Parallel HDF5 must be used with MPI.")
+    message(FATAL_ERROR "Parallel HDF5 was detected, but the detected compiler,\
+     ${CMAKE_CXX_COMPILER}, does not support MPI. An MPI-capable compiler must \
+     be used with parallel HDF5.")
   endif()
   message(STATUS "Using parallel HDF5")
 endif()
@@ -78,7 +105,7 @@ endif()
 # Set compile/link flags based on which compiler is being used
 #===============================================================================
 
-# Skip for Visual Stduio which has its own configurations through GUI
+# Skip for Visual Studio which has its own configurations through GUI
 if(NOT MSVC)
 
 if(openmp)
@@ -144,14 +171,19 @@ endif()
 # pugixml library
 #===============================================================================
 
-add_subdirectory(vendor/pugixml)
+if (NOT pugixml_FOUND)
+  add_subdirectory(vendor/pugixml)
+  set_target_properties(pugixml PROPERTIES CXX_STANDARD 14 CXX_EXTENSIONS OFF)
+endif()
 
 #===============================================================================
 # {fmt} library
 #===============================================================================
 
-set(FMT_INSTALL ON CACHE BOOL "Generate the install target.")
-add_subdirectory(vendor/fmt)
+if (NOT fmt_FOUND)
+  set(FMT_INSTALL ON CACHE BOOL "Generate the install target.")
+  add_subdirectory(vendor/fmt)
+endif()
 
 #===============================================================================
 # xtensor header-only library
@@ -225,6 +257,7 @@ target_compile_options(faddeeva PRIVATE ${cxxflags})
 
 list(APPEND libopenmc_SOURCES
   src/bank.cpp
+  src/boundary_condition.cpp
   src/bremsstrahlung.cpp
   src/dagmc.cpp
   src/cell.cpp
@@ -325,8 +358,10 @@ else()
   add_library(libopenmc SHARED ${libopenmc_SOURCES})
 endif()
 
-set_target_properties(libopenmc PROPERTIES
-  OUTPUT_NAME openmc)
+# Avoid vs error lnk1149 :output filename matches input filename
+if(NOT MSVC)
+  set_target_properties(libopenmc PROPERTIES OUTPUT_NAME openmc)
+endif()
 
 target_include_directories(libopenmc
   PUBLIC
@@ -337,6 +372,9 @@ target_include_directories(libopenmc
 
 # Set compile flags
 target_compile_options(libopenmc PRIVATE ${cxxflags})
+
+# Add include directory for configured version file
+target_include_directories(libopenmc PRIVATE ${CMAKE_BINARY_DIR}/include)
 
 if (HDF5_IS_PARALLEL)
   target_compile_definitions(libopenmc PRIVATE -DPHDF5)
@@ -372,12 +410,13 @@ endif()
 #===============================================================================
 add_executable(openmc src/main.cpp)
 target_compile_options(openmc PRIVATE ${cxxflags})
+target_include_directories(openmc PRIVATE ${CMAKE_BINARY_DIR}/include)
 target_link_libraries(openmc libopenmc)
 
 # Ensure C++14 standard is used. Starting with CMake 3.8, another way this could
 # be done is using the cxx_std_14 compiler feature.
 set_target_properties(
-    openmc libopenmc faddeeva pugixml
+    openmc libopenmc faddeeva
     PROPERTIES CXX_STANDARD 14 CXX_EXTENSIONS OFF)
 
 #===============================================================================
@@ -395,6 +434,7 @@ add_custom_command(TARGET libopenmc POST_BUILD
 #===============================================================================
 
 configure_file(cmake/OpenMCConfig.cmake.in "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenMCConfig.cmake" @ONLY)
+configure_file(cmake/OpenMCConfigVersion.cmake.in "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenMCConfigVersion.cmake" @ONLY)
 
 set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/OpenMC)
 install(TARGETS openmc libopenmc faddeeva
@@ -409,10 +449,14 @@ install(EXPORT openmc-targets
   DESTINATION ${INSTALL_CONFIGDIR})
 
 install(DIRECTORY src/relaxng DESTINATION ${CMAKE_INSTALL_DATADIR}/openmc)
-install(FILES "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenMCConfig.cmake" DESTINATION ${INSTALL_CONFIGDIR})
+install(FILES
+  "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenMCConfig.cmake"
+  "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenMCConfigVersion.cmake"
+  DESTINATION ${INSTALL_CONFIGDIR})
 install(FILES man/man1/openmc.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DOCDIR}" RENAME copyright)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES "${CMAKE_BINARY_DIR}/include/openmc/version.h" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/openmc)
 
 # Copy headers for vendored dependencies (note that all except faddeeva are handled
 # separately since they are managed by CMake)

@@ -24,8 +24,7 @@ namespace openmc {
 void read_particle_restart(Particle& p, RunMode& previous_run_mode)
 {
   // Write meessage
-  write_message("Loading particle restart file " +
-    settings::path_particle_restart + "...", 5);
+  write_message(5, "Loading particle restart file {}", settings::path_particle_restart);
 
   // Open file
   hid_t file_id = file_open(settings::path_particle_restart, 'r');
@@ -73,6 +72,9 @@ void run_particle_restart()
 {
   // Set verbosity high
   settings::verbosity = 10;
+
+  // Initialize nuclear data (energy limits, log grid, etc.)
+  initialize_data();
 
   // Initialize the particle to be tracked
   Particle p;

@@ -74,7 +74,7 @@ void title()
   // Write version information
   fmt::print(
     "                   | The OpenMC Monte Carlo Code\n"
-    "         Copyright | 2011-2020 MIT and OpenMC contributors\n"
+    "         Copyright | 2011-2021 MIT and OpenMC contributors\n"
     "           License | https://docs.openmc.org/en/latest/license.html\n"
     "           Version | {}.{}.{}{}\n", VERSION_MAJOR, VERSION_MINOR,
     VERSION_RELEASE, VERSION_DEV ? "-dev" : "");
@@ -328,7 +328,7 @@ void print_version()
 #ifdef GIT_SHA1
     fmt::print("Git SHA1: {}\n", GIT_SHA1);
 #endif
-    fmt::print("Copyright (c) 2011-2020 Massachusetts Institute of "
+    fmt::print("Copyright (c) 2011-2021 Massachusetts Institute of "
       "Technology and OpenMC contributors\nMIT/X license at "
       "<https://docs.openmc.org/en/latest/license.html>\n");
   }
@@ -420,6 +420,7 @@ void print_runtime()
     show_time("SEND/RECV source sites", time_bank_sendrecv.elapsed(), 2);
   }
   show_time("Time accumulating tallies", time_tallies.elapsed(), 1);
+  show_time("Time writing statepoints", time_statepoint.elapsed(), 1);
   show_time("Total time for finalization", time_finalize.elapsed());
   show_time("Total time elapsed", time_total.elapsed());
 

@@ -84,13 +84,13 @@ Particle::clear()
 }
 
 void
-Particle::create_secondary(Direction u, double E, Type type)
+Particle::create_secondary(double wgt, Direction u, double E, Type type)
 {
   secondary_bank_.emplace_back();
 
   auto& bank {secondary_bank_.back()};
   bank.particle = type;
-  bank.wgt = wgt_;
+  bank.wgt = wgt;
   bank.r = this->r();
   bank.u = u;
   bank.E = settings::run_CE ? E : g_;
@@ -156,7 +156,7 @@ Particle::event_calculate_xs()
   // initiate a search for the current cell. This generally happens at the
   // beginning of the history and again for any secondary particles
   if (coord_[n_coord_ - 1].cell == C_NONE) {
-    if (!find_cell(*this, false)) {
+    if (!exhaustive_find_cell(*this)) {
       this->mark_as_lost("Could not find the cell containing particle "
         + std::to_string(id_));
       return;
@@ -410,155 +410,26 @@ Particle::cross_surface()
   // TODO: off-by-one
   const auto& surf {model::surfaces[i_surface - 1].get()};
   if (settings::verbosity >= 10 || trace_) {
-    write_message("    Crossing surface " + std::to_string(surf->id_));
+    write_message(1, "    Crossing surface {}", surf->id_);
   }
 
-  if (surf->bc_ == Surface::BoundaryType::VACUUM && (settings::run_mode != RunMode::PLOTTING)) {
-    // =======================================================================
-    // PARTICLE LEAKS OUT OF PROBLEM
+  if (surf->surf_source_ && simulation::current_batch == settings::n_batches) {
+    Particle::Bank site;
+    site.r = this->r();
+    site.u = this->u();
+    site.E = this->E_;
+    site.wgt = this->wgt_;
+    site.delayed_group = this->delayed_group_;
+    site.surf_id = surf->id_;
+    site.particle = this->type_;
+    site.parent_id = this->id_;
+    site.progeny_id = this->n_progeny_;
+    int64_t idx = simulation::surf_source_bank.thread_safe_append(site);
+  }
 
-    // Kill particle
-    alive_ = false;
-
-    // Score any surface current tallies -- note that the particle is moved
-    // forward slightly so that if the mesh boundary is on the surface, it is
-    // still processed
-
-    if (!model::active_meshsurf_tallies.empty()) {
-      // TODO: Find a better solution to score surface currents than
-      // physically moving the particle forward slightly
-
-      this->r() += TINY_BIT * this->u();
-      score_surface_tally(*this, model::active_meshsurf_tallies);
-    }
-
-    // Score to global leakage tally
-    keff_tally_leakage_ += wgt_;
-
-    // Display message
-    if (settings::verbosity >= 10 || trace_) {
-      write_message("    Leaked out of surface " + std::to_string(surf->id_));
-    }
-    return;
-
-  } else if ((surf->bc_ == Surface::BoundaryType::REFLECT ||
-              surf->bc_ == Surface::BoundaryType::WHITE)
-              && (settings::run_mode != RunMode::PLOTTING)) {
-    // =======================================================================
-    // PARTICLE REFLECTS FROM SURFACE
-
-    // Do not handle reflective boundary conditions on lower universes
-    if (n_coord_ != 1) {
-      this->mark_as_lost("Cannot reflect particle " + std::to_string(id_) +
-        " off surface in a lower universe.");
-      return;
-    }
-
-    // Score surface currents since reflection causes the direction of the
-    // particle to change. For surface filters, we need to score the tallies
-    // twice, once before the particle's surface attribute has changed and
-    // once after. For mesh surface filters, we need to artificially move
-    // the particle slightly back in case the surface crossing is coincident
-    // with a mesh boundary
-
-    if (!model::active_surface_tallies.empty()) {
-      score_surface_tally(*this, model::active_surface_tallies);
-    }
-
-
-    if (!model::active_meshsurf_tallies.empty()) {
-      Position r {this->r()};
-      this->r() -= TINY_BIT * this->u();
-      score_surface_tally(*this, model::active_meshsurf_tallies);
-      this->r() = r;
-    }
-
-    Direction u = (surf->bc_ == Surface::BoundaryType::REFLECT) ?
-      surf->reflect(this->r(), this->u(), this) :
-      surf->diffuse_reflect(this->r(), this->u(), this->current_seed());
-
-    // Make sure new particle direction is normalized
-    this->u() = u / u.norm();
-
-    // Reassign particle's cell and surface
-    coord_[0].cell = cell_last_[n_coord_last_ - 1];
-    surface_ = -surface_;
-
-    // If a reflective surface is coincident with a lattice or universe
-    // boundary, it is necessary to redetermine the particle's coordinates in
-    // the lower universes.
-    // (unless we're using a dagmc model, which has exactly one universe)
-    if (!settings::dagmc) {
-      n_coord_ = 1;
-      if (!find_cell(*this, true)) {
-        this->mark_as_lost("Couldn't find particle after reflecting from surface "
-                           + std::to_string(surf->id_) + ".");
-        return;
-      }
-    }
-
-    // Set previous coordinate going slightly past surface crossing
-    r_last_current_ = this->r() + TINY_BIT*this->u();
-
-    // Diagnostic message
-    if (settings::verbosity >= 10 || trace_) {
-      write_message("    Reflected from surface " + std::to_string(surf->id_));
-    }
-    return;
-
-  } else if (surf->bc_ == Surface::BoundaryType::PERIODIC && settings::run_mode != RunMode::PLOTTING) {
-    // =======================================================================
-    // PERIODIC BOUNDARY
-
-    // Do not handle periodic boundary conditions on lower universes
-    if (n_coord_ != 1) {
-      this->mark_as_lost("Cannot transfer particle " + std::to_string(id_) +
-        " across surface in a lower universe. Boundary conditions must be "
-        "applied to root universe.");
-      return;
-    }
-
-    // Score surface currents since reflection causes the direction of the
-    // particle to change -- artificially move the particle slightly back in
-    // case the surface crossing is coincident with a mesh boundary
-    if (!model::active_meshsurf_tallies.empty()) {
-      Position r {this->r()};
-      this->r() -= TINY_BIT * this->u();
-      score_surface_tally(*this, model::active_meshsurf_tallies);
-      this->r() = r;
-    }
-
-    // Get a pointer to the partner periodic surface
-    auto surf_p = dynamic_cast<PeriodicSurface*>(surf);
-    auto other = dynamic_cast<PeriodicSurface*>(
-      model::surfaces[surf_p->i_periodic_].get());
-
-    // Adjust the particle's location and direction.
-    bool rotational = other->periodic_translate(surf_p, this->r(), this->u());
-
-    // Reassign particle's surface
-    // TODO: off-by-one
-    surface_ = rotational ?
-      surf_p->i_periodic_ + 1 :
-      ((surface_ > 0) ? surf_p->i_periodic_ + 1 : -(surf_p->i_periodic_ + 1));
-
-    // Figure out what cell particle is in now
-    n_coord_ = 1;
-
-    if (!find_cell(*this, true)) {
-      this->mark_as_lost("Couldn't find particle after hitting periodic "
-        "boundary on surface " + std::to_string(surf->id_) + ".");
-      return;
-    }
-
-    // Set previous coordinate going slightly past surface crossing
-    r_last_current_ = this->r() + TINY_BIT*this->u();
-
-    // Diagnostic message
-    if (settings::verbosity >= 10 || trace_) {
-      write_message("    Hit periodic boundary on surface " +
-        std::to_string(surf->id_));
-    }
+  // Handle any applicable boundary conditions.
+  if (surf->bc_ && settings::run_mode != RunMode::PLOTTING) {
+    surf->bc_->handle_particle(*this, *surf);
     return;
   }
 
@@ -583,7 +454,8 @@ Particle::cross_surface()
   }
 #endif
 
-  if (find_cell(*this, true)) return;
+  if (neighbor_list_find_cell(*this))
+    return;
 
   // ==========================================================================
   // COULDN'T FIND PARTICLE IN NEIGHBORING CELLS, SEARCH ALL CELLS
@@ -591,7 +463,7 @@ Particle::cross_surface()
   // Remove lower coordinate levels and assignment of surface
   surface_ = 0;
   n_coord_ = 1;
-  bool found = find_cell(*this, false);
+  bool found = exhaustive_find_cell(*this);
 
   if (settings::run_mode != RunMode::PLOTTING && (!found)) {
     // If a cell is still not found, there are two possible causes: 1) there is
@@ -605,12 +477,144 @@ Particle::cross_surface()
     // Couldn't find next cell anywhere! This probably means there is an actual
     // undefined region in the geometry.
 
-    if (!find_cell(*this, false)) {
+    if (!exhaustive_find_cell(*this)) {
       this->mark_as_lost("After particle " + std::to_string(id_) +
         " crossed surface " + std::to_string(surf->id_) +
         " it could not be located in any cell and it did not leak.");
       return;
     }
+  }
+}
+
+void
+Particle::cross_vacuum_bc(const Surface& surf)
+{
+  // Kill the particle
+  alive_ = false;
+
+  // Score any surface current tallies -- note that the particle is moved
+  // forward slightly so that if the mesh boundary is on the surface, it is
+  // still processed
+
+  if (!model::active_meshsurf_tallies.empty()) {
+    // TODO: Find a better solution to score surface currents than
+    // physically moving the particle forward slightly
+
+    this->r() += TINY_BIT * this->u();
+    score_surface_tally(*this, model::active_meshsurf_tallies);
+  }
+
+  // Score to global leakage tally
+  keff_tally_leakage_ += wgt_;
+
+  // Display message
+  if (settings::verbosity >= 10 || trace_) {
+    write_message(1, "    Leaked out of surface {}", surf.id_);
+  }
+}
+
+void
+Particle::cross_reflective_bc(const Surface& surf, Direction new_u)
+{
+  // Do not handle reflective boundary conditions on lower universes
+  if (n_coord_ != 1) {
+    this->mark_as_lost("Cannot reflect particle " + std::to_string(id_) +
+      " off surface in a lower universe.");
+    return;
+  }
+
+  // Score surface currents since reflection causes the direction of the
+  // particle to change. For surface filters, we need to score the tallies
+  // twice, once before the particle's surface attribute has changed and
+  // once after. For mesh surface filters, we need to artificially move
+  // the particle slightly back in case the surface crossing is coincident
+  // with a mesh boundary
+
+  if (!model::active_surface_tallies.empty()) {
+    score_surface_tally(*this, model::active_surface_tallies);
+  }
+
+  if (!model::active_meshsurf_tallies.empty()) {
+    Position r {this->r()};
+    this->r() -= TINY_BIT * this->u();
+    score_surface_tally(*this, model::active_meshsurf_tallies);
+    this->r() = r;
+  }
+
+  // Set the new particle direction
+  this->u() = new_u;
+
+  // Reassign particle's cell and surface
+  coord_[0].cell = cell_last_[n_coord_last_ - 1];
+  surface_ = -surface_;
+
+  // If a reflective surface is coincident with a lattice or universe
+  // boundary, it is necessary to redetermine the particle's coordinates in
+  // the lower universes.
+  // (unless we're using a dagmc model, which has exactly one universe)
+  if (!settings::dagmc) {
+    n_coord_ = 1;
+    if (!neighbor_list_find_cell(*this)) {
+      this->mark_as_lost("Couldn't find particle after reflecting from surface "
+                         + std::to_string(surf.id_) + ".");
+      return;
+    }
+  }
+
+  // Set previous coordinate going slightly past surface crossing
+  r_last_current_ = this->r() + TINY_BIT*this->u();
+
+  // Diagnostic message
+  if (settings::verbosity >= 10 || trace_) {
+    write_message(1, "    Reflected from surface {}", surf.id_);
+  }
+}
+
+void
+Particle::cross_periodic_bc(const Surface& surf, Position new_r,
+                            Direction new_u, int new_surface)
+{
+  // Do not handle periodic boundary conditions on lower universes
+  if (n_coord_ != 1) {
+    this->mark_as_lost("Cannot transfer particle " + std::to_string(id_) +
+      " across surface in a lower universe. Boundary conditions must be "
+      "applied to root universe.");
+    return;
+  }
+
+  // Score surface currents since reflection causes the direction of the
+  // particle to change -- artificially move the particle slightly back in
+  // case the surface crossing is coincident with a mesh boundary
+  if (!model::active_meshsurf_tallies.empty()) {
+    Position r {this->r()};
+    this->r() -= TINY_BIT * this->u();
+    score_surface_tally(*this, model::active_meshsurf_tallies);
+    this->r() = r;
+  }
+
+  // Adjust the particle's location and direction.
+  r() = new_r;
+  u() = new_u;
+
+  // Reassign particle's surface
+  surface_ = new_surface;
+
+  // Figure out what cell particle is in now
+  n_coord_ = 1;
+
+  if (!neighbor_list_find_cell(*this)) {
+    this->mark_as_lost("Couldn't find particle after hitting periodic "
+      "boundary on surface " + std::to_string(surf.id_) + ". The normal vector "
+      "of one periodic surface may need to be reversed.");
+    return;
+  }
+
+  // Set previous coordinate going slightly past surface crossing
+  r_last_current_ = this->r() + TINY_BIT*this->u();
+
+  // Diagnostic message
+  if (settings::verbosity >= 10 || trace_) {
+    write_message(1, "    Hit periodic boundary on surface {}", surf.id_);
   }
 }
 

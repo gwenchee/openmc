@@ -5,8 +5,8 @@
 #include <cctype>
 #include <cmath>
 #include <iterator>
-#include <sstream>
 #include <set>
+#include <sstream>
 #include <string>
 
 #include <fmt/core.h>
@@ -32,11 +32,11 @@ namespace openmc {
 //==============================================================================
 
 namespace model {
-  std::vector<std::unique_ptr<Cell>> cells;
   std::unordered_map<int32_t, int32_t> cell_map;
+  std::vector<std::unique_ptr<Cell>> cells;
 
-  std::vector<std::unique_ptr<Universe>> universes;
   std::unordered_map<int32_t, int32_t> universe_map;
+  std::vector<std::unique_ptr<Universe>> universes;
 } // namespace model
 
 //==============================================================================
@@ -240,7 +240,7 @@ Cell::temperature(int32_t instance) const
 }
 
 void
-Cell::set_temperature(double T, int32_t instance)
+Cell::set_temperature(double T, int32_t instance, bool set_contained)
 {
   if (settings::temperature_method == TemperatureMethod::INTERPOLATION) {
     if (T < data::temperature_min) {
@@ -252,16 +252,33 @@ Cell::set_temperature(double T, int32_t instance)
     }
   }
 
-  if (instance >= 0) {
-    // If temperature vector is not big enough, resize it first
-    if (sqrtkT_.size() != n_instances_) sqrtkT_.resize(n_instances_, sqrtkT_[0]);
+  if (type_ == Fill::MATERIAL) {
+    if (instance >= 0) {
+      // If temperature vector is not big enough, resize it first
+      if (sqrtkT_.size() != n_instances_) sqrtkT_.resize(n_instances_, sqrtkT_[0]);
 
-    // Set temperature for the corresponding instance
-    sqrtkT_.at(instance) = std::sqrt(K_BOLTZMANN * T);
+      // Set temperature for the corresponding instance
+      sqrtkT_.at(instance) = std::sqrt(K_BOLTZMANN * T);
+    } else {
+      // Set temperature for all instances
+      for (auto& T_ : sqrtkT_) {
+        T_ = std::sqrt(K_BOLTZMANN * T);
+      }
+    }
   } else {
-    // Set temperature for all instances
-    for (auto& T_ : sqrtkT_) {
-      T_ = std::sqrt(K_BOLTZMANN * T);
+    if (!set_contained) {
+      throw std::runtime_error{fmt::format("Attempted to set the temperature of cell {} "
+                                           "which is not filled by a material.", id_)};
+    }
+
+    auto contained_cells = this->get_contained_cells();
+    for (const auto& entry : contained_cells) {
+      auto& cell = model::cells[entry.first];
+      Expects(cell->type_ == Fill::MATERIAL);
+      auto& instances =  entry.second;
+      for (auto instance : instances) {
+        cell->set_temperature(T, instance);
+      }
     }
   }
 }
@@ -497,7 +514,7 @@ CSGCell::distance(Position r, Direction u, int32_t on_surface, Particle* p) cons
 
     // Check if this distance is the new minimum.
     if (d < min_dist) {
-      if (std::abs(d - min_dist) / min_dist >= FP_PRECISION) {
+      if (min_dist - d >= FP_PRECISION*min_dist) {
         min_dist = d;
         i_surf = -token;
       }
@@ -762,7 +779,7 @@ CSGCell::contains_complex(Position r, Direction u, int32_t on_surface) const
 // DAGMC Cell implementation
 //==============================================================================
 #ifdef DAGMC
-DAGCell::DAGCell() : Cell{} {};
+DAGCell::DAGCell() : Cell{} { simple_ = true; };
 
 std::pair<double, int32_t>
 DAGCell::distance(Position r, Direction u, int32_t on_surface, Particle* p) const
@@ -1075,7 +1092,7 @@ openmc_cell_set_fill(int32_t index, int type, int32_t n,
 }
 
 extern "C" int
-openmc_cell_set_temperature(int32_t index, double T, const int32_t* instance)
+openmc_cell_set_temperature(int32_t index, double T, const int32_t* instance, bool set_contained)
 {
   if (index < 0 || index >= model::cells.size()) {
     strcpy(openmc_err_msg, "Index in cells array is out of bounds.");
@@ -1084,7 +1101,7 @@ openmc_cell_set_temperature(int32_t index, double T, const int32_t* instance)
 
   int32_t instance_index = instance ? *instance : -1;
   try {
-    model::cells[index]->set_temperature(T, instance_index);
+    model::cells[index]->set_temperature(T, instance_index, set_contained);
   } catch (const std::exception& e) {
     set_errmsg(e.what());
     return OPENMC_E_UNASSIGNED;
@@ -1158,6 +1175,67 @@ openmc_cell_set_name(int32_t index, const char* name) {
   return 0;
 }
 
+
+std::unordered_map<int32_t, std::vector<int32_t>>
+Cell::get_contained_cells() const {
+  std::unordered_map<int32_t, std::vector<int32_t>> contained_cells;
+  std::vector<ParentCell> parent_cells;
+
+  // if this cell is filled w/ a material, it contains no other cells
+  if (type_ != Fill::MATERIAL) {
+    this->get_contained_cells_inner(contained_cells, parent_cells);
+  }
+
+  return contained_cells;
+}
+
+//! Get all cells within this cell
+void
+Cell::get_contained_cells_inner(std::unordered_map<int32_t, std::vector<int32_t>>& contained_cells,
+                                std::vector<ParentCell>& parent_cells) const
+{
+
+  // filled by material, determine instance based on parent cells
+  if (type_ == Fill::MATERIAL) {
+    int instance = 0;
+    if (this->distribcell_index_ >= 0) {
+      for (auto& parent_cell : parent_cells) {
+        auto& cell = openmc::model::cells[parent_cell.cell_index];
+        if (cell->type_ == Fill::UNIVERSE) {
+          instance += cell->offset_[distribcell_index_];
+        } else if (cell->type_ == Fill::LATTICE) {
+          auto& lattice = model::lattices[cell->fill_];
+          instance += lattice->offset(this->distribcell_index_, parent_cell.lattice_index);
+        }
+      }
+    }
+    // add entry to contained cells
+    contained_cells[model::cell_map[id_]].push_back(instance);
+  // filled with universe, add the containing cell to the parent cells
+  // and recurse
+  } else if (type_ == Fill::UNIVERSE) {
+    parent_cells.push_back({model::cell_map[id_], -1});
+    auto& univ = model::universes[fill_];
+    for(auto cell_index : univ->cells_) {
+      auto& cell = model::cells[cell_index];
+      cell->get_contained_cells_inner(contained_cells, parent_cells);
+    }
+    parent_cells.pop_back();
+  // filled with a lattice, visit each universe in the lattice
+  // with a recursive call to collect the cell instances
+  } else if (type_ == Fill::LATTICE) {
+    auto& lattice = model::lattices[fill_];
+    for (auto i = lattice->begin(); i != lattice->end(); ++i) {
+      auto& univ = model::universes[*i];
+      parent_cells.push_back({model::cell_map[id_], i.indx_});
+      for (auto cell_index : univ->cells_) {
+        auto& cell = model::cells[cell_index];
+        cell->get_contained_cells_inner(contained_cells, parent_cells);
+      }
+      parent_cells.pop_back();
+    }
+  }
+}
 
 //! Return the index in the cells array of a cell with a given ID
 extern "C" int

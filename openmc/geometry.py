@@ -110,6 +110,7 @@ class Geometry:
             p /= 'geometry.xml'
 
         # Write the XML Tree to the geometry.xml file
+        xml.reorder_attributes(root_element)  # TODO: Remove when support is Python 3.8+
         tree = ET.ElementTree(root_element)
         tree.write(str(p), xml_declaration=True, encoding='utf-8')
 
@@ -567,7 +568,8 @@ class Geometry:
         # Iterate through all cells contained in the geometry
         for cell in self.get_all_cells().values():
             # Recursively remove redundant surfaces from regions
-            cell.region.remove_redundant_surfaces(redundant_surfaces)
+            if cell.region:
+                cell.region.remove_redundant_surfaces(redundant_surfaces)
 
     def determine_paths(self, instances_only=False):
         """Determine paths through CSG tree for cells and materials.

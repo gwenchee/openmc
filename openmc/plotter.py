@@ -16,7 +16,7 @@ PLOT_TYPES = ['total', 'scatter', 'elastic', 'inelastic', 'fission',
 PLOT_TYPES_MGXS = ['total', 'absorption', 'scatter', 'fission',
                    'kappa-fission', 'nu-fission', 'prompt-nu-fission',
                    'deleyed-nu-fission', 'chi', 'chi-prompt', 'chi-delayed',
-                   'inverse-velocity', 'beta', 'decay rate', 'unity']
+                   'inverse-velocity', 'beta', 'decay-rate', 'unity']
 # Create a dictionary which can be used to convert PLOT_TYPES_MGXS to the
 # openmc.XSdata attribute name needed to access the data
 _PLOT_MGXS_ATTR = {line: line.replace(' ', '_').replace('-', '_')
@@ -40,25 +40,8 @@ PLOT_TYPES_MT = {
     'nu-fission': [18],
     'nu-scatter': [2] + _INELASTIC,
     'unity': [UNITY_MT],
-    'slowing-down power': [2] + _INELASTIC + [XI_MT],
+    'slowing-down power': [2] + [XI_MT],
     'damage': [444]
-}
-# Operations to use when combining MTs the first np.add is used in reference
-# to zero
-PLOT_TYPES_OP = {
-    'total': (np.add,),
-    'scatter': (np.add,) * (len(PLOT_TYPES_MT['scatter']) - 1),
-    'elastic': (),
-    'inelastic': (np.add,) * (len(PLOT_TYPES_MT['inelastic']) - 1),
-    'fission': (),
-    'absorption': (),
-    'capture': (),
-    'nu-fission': (),
-    'nu-scatter': (np.add,) * (len(PLOT_TYPES_MT['nu-scatter']) - 1),
-    'unity': (),
-    'slowing-down power': \
-        (np.add,) * (len(PLOT_TYPES_MT['slowing-down power']) - 2) + (np.multiply,),
-    'damage': ()
 }
 
 # Types of plots to plot linearly in y
@@ -326,8 +309,9 @@ def _calculate_cexs_nuclide(this, types, temperature=294., sab_name=None,
         Nuclide object to source data from
     types : Iterable of str or Integral
         The type of cross sections to calculate; values can either be those
-        in openmc.PLOT_TYPES or integers which correspond to reaction
-        channel (MT) numbers.
+        in openmc.PLOT_TYPES or keys from openmc.data.REACTION_MT which
+        correspond to a reaction description e.g '(n,2n)' or integers which
+        correspond to reaction channel (MT) numbers.
     temperature : float, optional
         Temperature in Kelvin to plot. If not specified, a default
         temperature of 294K will be plotted. Note that the nearest
@@ -346,26 +330,6 @@ def _calculate_cexs_nuclide(this, types, temperature=294., sab_name=None,
         Requested cross section functions
 
     """
-
-    # Parse the types
-    mts = []
-    ops = []
-    yields = []
-    for line in types:
-        if line in PLOT_TYPES:
-            mts.append(PLOT_TYPES_MT[line])
-            if line.startswith('nu'):
-                yields.append(True)
-            else:
-                yields.append(False)
-            ops.append(PLOT_TYPES_OP[line])
-        else:
-            # Not a built-in type, we have to parse it ourselves
-            cv.check_type('MT in types', line, Integral)
-            cv.check_greater_than('MT in types', line, 0)
-            mts.append((line,))
-            ops.append(())
-            yields.append(False)
 
     # Load the library
     library = openmc.data.DataLibrary.from_xml(cross_sections)
@@ -423,6 +387,42 @@ def _calculate_cexs_nuclide(this, types, temperature=294., sab_name=None,
             energy_grid = grid
         else:
             energy_grid = nuc.energy[nucT]
+
+        # Parse the types
+        mts = []
+        ops = []
+        yields = []
+        for line in types:
+            if line in PLOT_TYPES:
+                tmp_mts = [mtj for mti in PLOT_TYPES_MT[line] for mtj in
+                           nuc.get_reaction_components(mti)]
+                mts.append(tmp_mts)
+                if line.startswith('nu'):
+                    yields.append(True)
+                else:
+                    yields.append(False)
+                if XI_MT in tmp_mts:
+                    ops.append((np.add,) * (len(tmp_mts) - 2) + (np.multiply,))
+                else:
+                    ops.append((np.add,) * (len(tmp_mts) - 1))
+            elif line in openmc.data.REACTION_MT:
+                mt_number = openmc.data.REACTION_MT[line]
+                cv.check_type('MT in types', mt_number, Integral)
+                cv.check_greater_than('MT in types', mt_number, 0)
+                tmp_mts = nuc.get_reaction_components(mt_number)
+                mts.append(tmp_mts)
+                ops.append((np.add,) * (len(tmp_mts) - 1))
+                yields.append(False)
+            elif isinstance(line, int):
+                # Not a built-in type, we have to parse it ourselves
+                cv.check_type('MT in types', line, Integral)
+                cv.check_greater_than('MT in types', line, 0)
+                tmp_mts = nuc.get_reaction_components(line)
+                mts.append(tmp_mts)
+                ops.append((np.add,) * (len(tmp_mts) - 1))
+                yields.append(False)
+            else:
+                raise TypeError("Invalid type", line)
 
         for i, mt_set in enumerate(mts):
             # Get the reaction xs data from the nuclide
@@ -487,6 +487,7 @@ def _calculate_cexs_nuclide(this, types, temperature=294., sab_name=None,
                     funcs.append(lambda x: xi)
                 else:
                     funcs.append(lambda x: 0.)
+            funcs = funcs if funcs else [lambda x: 0.]
             xs.append(openmc.data.Combination(funcs, op))
     else:
         raise ValueError(this + " not in library")
