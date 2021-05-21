@@ -47,6 +47,7 @@ extern "C" {
   int openmc_get_mesh_index(int32_t id, int32_t* index);
   int openmc_get_n_batches(int* n_batches, bool get_max_batches);
   int openmc_get_nuclide_index(const char name[], int* index);
+  int openmc_add_unstructured_mesh(const char filename[], const char library[], int* id);
   int64_t openmc_get_seed();
   int openmc_get_tally_index(int32_t id, int32_t* index);
   void openmc_get_tally_next_id(int32_t* id);
@@ -73,6 +74,8 @@ extern "C" {
   int openmc_material_filter_set_bins(int32_t index, size_t n, const int32_t* bins);
   int openmc_mesh_filter_get_mesh(int32_t index, int32_t* index_mesh);
   int openmc_mesh_filter_set_mesh(int32_t index, int32_t index_mesh);
+  int openmc_mesh_filter_get_translation(int32_t index, double translation[3]);
+  int openmc_mesh_filter_set_translation(int32_t index, double translation[3]);
   int openmc_mesh_get_id(int32_t index, int32_t* id);
   int openmc_mesh_set_id(int32_t index, int32_t id);
   int openmc_meshsurface_filter_get_mesh(int32_t index, int32_t* index_mesh);
